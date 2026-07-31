@@ -41,6 +41,7 @@ export function renderTable(
   const table = document.createElement('table');
   table.className = 'sheet-table';
   table.setAttribute('aria-label', options.label);
+  table.append(createColumnGroup(model.maxColumns, options.addressed));
 
   const bodyStart = options.addressed || !options.headerRow ? 0 : 1;
   if (options.addressed) {
@@ -82,6 +83,21 @@ export function renderTable(
   }
 
   root.replaceChildren(style, surface);
+}
+
+function createColumnGroup(columnCount: number, addressed: boolean): HTMLTableColElement {
+  const group = document.createElement('colgroup');
+  if (addressed) {
+    const gutter = document.createElement('col');
+    gutter.className = 'sheet-table__gutter-column';
+    group.append(gutter);
+  }
+  for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
+    const column = document.createElement('col');
+    column.className = 'sheet-table__data-column';
+    group.append(column);
+  }
+  return group;
 }
 
 function createAddressedHead(columnCount: number): HTMLTableSectionElement {

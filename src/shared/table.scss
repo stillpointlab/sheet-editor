@@ -43,20 +43,24 @@
 .sheet-table {
   box-sizing: border-box;
   width: max-content;
-  min-width: 100%;
   border-spacing: 0;
   table-layout: fixed;
   background: inherit;
 }
 
+.sheet-table__gutter-column {
+  width: var(--spl-sheet-row-gutter-width, 36px);
+}
+
+.sheet-table__data-column {
+  width: var(--spl-sheet-cell-width, 160px);
+}
+
 .sheet-table th,
 .sheet-table td {
   box-sizing: border-box;
-  width: var(--spl-sheet-cell-width, 160px);
-  min-width: var(--spl-sheet-cell-width, 160px);
-  max-width: var(--spl-sheet-cell-width, 160px);
-  height: var(--spl-sheet-row-height, 32px);
-  padding: 0 3px;
+  height: var(--spl-sheet-row-height, 20px);
+  padding: 3px;
   overflow: hidden;
   border-right: 1px solid var(--spl-sheet-border, var(--color-border, #d0d7de));
   border-bottom: 1px solid var(--spl-sheet-border, var(--color-border, #d0d7de));
@@ -91,10 +95,6 @@
   position: sticky;
   z-index: 2;
   left: 0;
-  width: var(--spl-sheet-row-gutter-width, 36px);
-  min-width: var(--spl-sheet-row-gutter-width, 36px);
-  max-width: var(--spl-sheet-row-gutter-width, 36px);
-  padding: 0 3px;
   color: var(--spl-sheet-muted, var(--color-text-muted, #57606a));
   text-align: center;
 }

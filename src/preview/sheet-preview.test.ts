@@ -22,6 +22,11 @@ describe('sheet-preview', () => {
     expect(columnHeaders[25]?.textContent).toBe('Z');
     expect(columnHeaders[26]?.textContent).toBe('AA');
 
+    const columns = element.shadowRoot?.querySelectorAll('colgroup col');
+    expect(columns).toHaveLength(28);
+    expect(columns?.[0]?.classList.contains('sheet-table__gutter-column')).toBe(true);
+    expect(columns?.[1]?.classList.contains('sheet-table__data-column')).toBe(true);
+
     const rowHeader = element.shadowRoot?.querySelector('.sheet-table__row-header');
     expect(rowHeader?.textContent).toBe('1');
     expect(rowHeader?.getAttribute('scope')).toBe('row');
