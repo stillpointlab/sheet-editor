@@ -90,11 +90,17 @@
   position: sticky;
   z-index: 2;
   left: 0;
-  width: var(--spl-sheet-row-gutter-width, 52px);
-  min-width: var(--spl-sheet-row-gutter-width, 52px);
-  max-width: var(--spl-sheet-row-gutter-width, 52px);
+  width: var(--spl-sheet-row-gutter-width, 36px);
+  min-width: var(--spl-sheet-row-gutter-width, 36px);
+  max-width: var(--spl-sheet-row-gutter-width, 36px);
+  padding: 0 4px;
   color: var(--spl-sheet-muted, var(--color-text-muted, #57606a));
-  text-align: right;
+  text-align: center;
+}
+
+.sheet-table__row-header {
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .sheet-table__corner {
