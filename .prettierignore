@@ -1,0 +1,5 @@
+dist
+dist-dev
+node_modules
+# generated from table.scss by scripts/gen-styles.mjs
+src/shared/table.styles.ts

@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sheet-editor playground</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+
+      body {
+        box-sizing: border-box;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 24px;
+        color: #1f2933;
+        background: #f6f8fa;
+        font-family: system-ui, sans-serif;
+      }
+
+      body.dark {
+        color: #e6edf3;
+        background: #010409;
+      }
+
+      h1 {
+        font-size: 1.4rem;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+
+      .fixture {
+        display: grid;
+        gap: 16px;
+      }
+
+      .pane {
+        box-sizing: border-box;
+        width: 100%;
+        height: 360px;
+        transition: width 120ms ease;
+      }
+
+      .pane.narrow {
+        width: 360px;
+      }
+
+      sheet-preview,
+      sheet-grid {
+        --spl-sheet-background: #ffffff;
+        --spl-sheet-header-background: #f6f8fa;
+        --spl-sheet-text: #1f2933;
+        --spl-sheet-muted: #57606a;
+        --spl-sheet-border: #d0d7de;
+      }
+
+      body.dark sheet-preview,
+      body.dark sheet-grid {
+        --spl-sheet-background: #0d1117;
+        --spl-sheet-header-background: #161b22;
+        --spl-sheet-text: #e6edf3;
+        --spl-sheet-muted: #8b949e;
+        --spl-sheet-border: #30363d;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>sheet-editor preview harness</h1>
+    <div class="controls">
+      <label>
+        Fixture
+        <select id="fixture">
+          <option value="regular">Quoted and ragged</option>
+          <option value="wide">Columns beyond Z</option>
+          <option value="truncated">1,001 rows</option>
+          <option value="malformed">Malformed CSV</option>
+          <option value="oversized">Over 256 KiB</option>
+        </select>
+      </label>
+      <button id="width" type="button">Toggle narrow pane</button>
+      <button id="theme" type="button">Toggle dark theme</button>
+    </div>
+
+    <div class="fixture">
+      <section>
+        <h2>A1 sheet preview</h2>
+        <div class="pane"><sheet-preview id="preview"></sheet-preview></div>
+      </section>
+      <section>
+        <h2>Gutterless grid with header row</h2>
+        <div class="pane"><sheet-grid id="grid" header-row></sheet-grid></div>
+      </section>
+    </div>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
