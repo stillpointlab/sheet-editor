@@ -1,8 +1,11 @@
 import '../src/grid';
+import '../src/editor';
 import '../src/preview';
 
+import { serializeCsv } from '../src/csv';
 import { parseSheetDocument } from '../src/document';
 
+import type { SheetEditor } from '../src/editor';
 import type { SheetGrid } from '../src/grid';
 import type { SheetPresentation } from '../src/presentation';
 import type { SheetPreview } from '../src/preview';
@@ -22,6 +25,7 @@ interface Fixture {
 }
 
 const fixtures: Record<string, Fixture> = {
+  empty: { source: '' },
   regular: { source: regular },
   wide: { source: Array.from({ length: 30 }, (_, index) => `Column ${index + 1}`).join(',') },
   truncated: {
@@ -86,6 +90,7 @@ const fixtures: Record<string, Fixture> = {
 
 const preview = document.querySelector('#preview') as SheetPreview;
 const grid = document.querySelector('#grid') as SheetGrid;
+const editor = document.querySelector('#editor') as SheetEditor;
 const fixture = document.querySelector('#fixture') as HTMLSelectElement;
 const panes = [...document.querySelectorAll('.pane')];
 
@@ -96,10 +101,17 @@ function render(): void {
     if (!parsed.ok) throw new Error(parsed.error.message);
     preview.setDocument(parsed.document, { presentation: selected.documentOverride });
     grid.setDocument(parsed.document, { presentation: selected.documentOverride });
+    editor.setContent(serializeCsv(parsed.document.data.rows), {
+      presentation:
+        selected.documentOverride === undefined
+          ? parsed.document.presentation
+          : selected.documentOverride,
+    });
     return;
   }
   preview.setContent(selected.source, { presentation: selected.presentation });
   grid.setContent(selected.source, { presentation: selected.presentation });
+  editor.setContent(selected.source, { presentation: selected.presentation });
 }
 
 fixture.addEventListener('change', render);

@@ -1,7 +1,7 @@
 # @stillpointlab/sheet-editor
 
-Read-only spreadsheet-style CSV preview and grid web components for Stillpoint Lab editor
-surfaces.
+Spreadsheet-style CSV grid web components and side-effect-free sheet codecs for Stillpoint Lab
+editor surfaces.
 
 ## Entrypoints
 
@@ -10,7 +10,9 @@ surfaces.
 - `@stillpointlab/sheet-editor/preview` — registers `<sheet-preview>`, an A1-style cells pane
 - `@stillpointlab/sheet-editor/presentation` — side-effect-free merged-range validation
 - `@stillpointlab/sheet-editor/document` — side-effect-free strict `.sheet` parsing and serialization
-- `@stillpointlab/sheet-editor` — registers and exports both preview-facing elements
+- `@stillpointlab/sheet-editor/interaction` — side-effect-free selection and merged-cell geometry
+- `@stillpointlab/sheet-editor/editor` — registers `<sheet-editor>`, an interactive CSV selection grid
+- `@stillpointlab/sheet-editor` — registers and exports the grid, preview, and editor elements
 
 ## Usage
 
@@ -55,6 +57,29 @@ grid.setData(
 );
 ```
 
+## Interactive selection
+
+`<sheet-editor>` adds one accessible source-coordinate selection without changing CSV values. Arrow
+keys move the active cell, Shift+Arrow extends the range, and pointer dragging selects a rectangle.
+Merged ranges are always entered, crossed, and selected as complete units.
+
+```ts
+import '@stillpointlab/sheet-editor/editor';
+
+const editor = document.createElement('sheet-editor');
+editor.setContent('Name,Value\nCoffee,12', {
+  presentation: {
+    merges: [{ startRow: 0, endRow: 1, startColumn: 0, endColumn: 2 }],
+  },
+});
+document.body.append(editor);
+editor.focus();
+```
+
+The interaction-only editor preserves `getContent()` byte-for-byte and emits no content events.
+Empty and ragged CSV expose one bounded virtual authoring row/column, but selection alone never
+materializes those cells. Value editing follows in separate package slices.
+
 ## `.sheet` documents
 
 The versioned `.sheet` envelope keeps a CSV body and merged-cell presentation in one text document:
@@ -85,8 +110,8 @@ if (parsed.ok) preview.setDocument(parsed.document);
 An optional call-site presentation inherits embedded merges when omitted, suppresses them with
 `null` or `{ merges: [] }`, and replaces the complete merge section when ranges are supplied.
 
-The package is preview-only. CSV editing, formulas, cell selection, and workbook formats are
-deliberately outside the MVP.
+Plain CSV editing is not yet enabled. Formulas, workbook formats, structural commands, and
+presentation editing remain outside this slice.
 
 ## Scripts
 
