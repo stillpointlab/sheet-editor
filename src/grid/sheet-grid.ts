@@ -1,10 +1,15 @@
 /// <reference lib="dom" />
 
 import { parseCsv, type CsvParseResult } from '../csv';
+import {
+  snapshotSheetPresentation,
+  type SheetContentOptions,
+  type SheetPresentation,
+} from '../presentation/presentation';
 import { modelFromRows } from '../shared/model';
 import { renderTable } from '../shared/render';
 
-export interface SheetGridDataOptions {
+export interface SheetGridDataOptions extends SheetContentOptions {
   headerRow?: boolean;
 }
 
@@ -12,6 +17,7 @@ export class SheetGrid extends HTMLElement {
   private readonly root: ShadowRoot;
   private model: CsvParseResult = parseCsv('');
   private headerRowOverride: boolean | undefined;
+  private presentation: SheetPresentation = {};
 
   static get observedAttributes(): string[] {
     return ['header-row'];
@@ -31,9 +37,10 @@ export class SheetGrid extends HTMLElement {
     this.render();
   }
 
-  setContent(content: string): void {
+  setContent(content: string, options: SheetContentOptions = {}): void {
     this.headerRowOverride = undefined;
     this.model = parseCsv(content);
+    this.presentation = snapshotSheetPresentation(options.presentation);
     if (this.isConnected) this.render();
   }
 
@@ -41,6 +48,7 @@ export class SheetGrid extends HTMLElement {
     this.headerRowOverride =
       options.headerRow === undefined ? undefined : Boolean(options.headerRow);
     this.model = modelFromRows(rows);
+    this.presentation = snapshotSheetPresentation(options.presentation);
     if (this.isConnected) this.render();
   }
 
@@ -50,6 +58,7 @@ export class SheetGrid extends HTMLElement {
       headerRow: this.headerRowOverride ?? this.hasAttribute('header-row'),
       label: 'Data grid',
       emptyMessage: 'No grid data.',
+      presentation: this.presentation,
     });
   }
 }
