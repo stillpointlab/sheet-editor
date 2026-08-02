@@ -130,8 +130,20 @@ if (parsed.ok) preview.setDocument(parsed.document);
 An optional call-site presentation inherits embedded merges when omitted, suppresses them with
 `null` or `{ merges: [] }`, and replaces the complete merge section when ranges are supplied.
 
-Plain CSV editing is not yet enabled. Formulas, workbook formats, structural commands, and
-presentation editing remain outside this slice.
+Plain CSV editing is enabled through `<sheet-editor>`. Editing the `.sheet` envelope itself,
+formulas, workbook formats, structural commands, and presentation commands remain outside this
+slice.
+
+## Theming
+
+All three elements follow host theme changes through the Stillpoint tokens
+`--spl-text-primary`, `--spl-text-muted`, `--spl-background-primary`, `--spl-header-bg`,
+`--spl-border-light`, `--spl-primary-blue`, and `--spl-error-color`. Standalone consumers receive
+contrasting light/dark fallbacks through `prefers-color-scheme`.
+
+Owners can override individual sheet surfaces with `--spl-sheet-text`, `--spl-sheet-muted`,
+`--spl-sheet-background`, `--spl-sheet-header-background`, `--spl-sheet-border`,
+`--spl-sheet-focus`, `--spl-sheet-selection`, and `--spl-sheet-danger`.
 
 ## Scripts
 

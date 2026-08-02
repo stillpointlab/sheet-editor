@@ -7,6 +7,14 @@
     <style>
       :root {
         color-scheme: light dark;
+        --spl-background-primary: #ffffff;
+        --spl-header-bg: #f6f8fa;
+        --spl-text-primary: #1f2933;
+        --spl-text-muted: #57606a;
+        --spl-border-light: #d0d7de;
+        --spl-primary-blue: #0969da;
+        --spl-error-color: #b42318;
+        --harness-background: #f6f8fa;
       }
 
       body {
@@ -14,14 +22,21 @@
         max-width: 1180px;
         margin: 0 auto;
         padding: 24px;
-        color: #1f2933;
-        background: #f6f8fa;
+        color: var(--spl-text-primary);
+        background: var(--harness-background);
         font-family: system-ui, sans-serif;
       }
 
       body.dark {
-        color: #e6edf3;
-        background: #010409;
+        color-scheme: dark;
+        --spl-background-primary: #0d1117;
+        --spl-header-bg: #161b22;
+        --spl-text-primary: #e6edf3;
+        --spl-text-muted: #8b949e;
+        --spl-border-light: #30363d;
+        --spl-primary-blue: #58a6ff;
+        --spl-error-color: #ff7b72;
+        --harness-background: #010409;
       }
 
       h1 {
@@ -49,26 +64,6 @@
 
       .pane.narrow {
         width: 360px;
-      }
-
-      sheet-preview,
-      sheet-grid,
-      sheet-editor {
-        --spl-sheet-background: #ffffff;
-        --spl-sheet-header-background: #f6f8fa;
-        --spl-sheet-text: #1f2933;
-        --spl-sheet-muted: #57606a;
-        --spl-sheet-border: #d0d7de;
-      }
-
-      body.dark sheet-preview,
-      body.dark sheet-grid,
-      body.dark sheet-editor {
-        --spl-sheet-background: #0d1117;
-        --spl-sheet-header-background: #161b22;
-        --spl-sheet-text: #e6edf3;
-        --spl-sheet-muted: #8b949e;
-        --spl-sheet-border: #30363d;
       }
     </style>
   </head>

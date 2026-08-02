@@ -781,8 +781,39 @@ export class SheetEditor extends HTMLElement {
   private focusActiveCell(options?: FocusOptions): void {
     const active = this.cellAt(this.selection.active);
     if (!active) return;
-    active.focus(options);
-    active.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    active.focus({ ...options, preventScroll: true });
+    this.scrollCellIntoView(active);
+  }
+
+  private scrollCellIntoView(cell: HTMLTableCellElement): void {
+    const scroll = cell.closest<HTMLElement>('.sheet-surface__scroll');
+    if (!scroll) return;
+
+    const viewport = scroll.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+    const rowHeader = this.root.querySelector<HTMLElement>('.sheet-table__row-header');
+    const columnHeader = this.root.querySelector<HTMLElement>('.sheet-table__column-header');
+    const rowHeaderRect = rowHeader?.getBoundingClientRect();
+    const columnHeaderRect = columnHeader?.getBoundingClientRect();
+    const visibleLeft =
+      viewport.left + Math.max(0, (rowHeaderRect?.right ?? viewport.left) - viewport.left);
+    const visibleTop =
+      viewport.top + Math.max(0, (columnHeaderRect?.bottom ?? viewport.top) - viewport.top);
+
+    let horizontalDelta = 0;
+    if (cellRect.left < visibleLeft) horizontalDelta = cellRect.left - visibleLeft;
+    else if (cellRect.right > viewport.right) horizontalDelta = cellRect.right - viewport.right;
+
+    let verticalDelta = 0;
+    if (cellRect.top < visibleTop) verticalDelta = cellRect.top - visibleTop;
+    else if (cellRect.bottom > viewport.bottom) verticalDelta = cellRect.bottom - viewport.bottom;
+
+    if (horizontalDelta !== 0) {
+      scroll.scrollLeft = Math.max(0, scroll.scrollLeft + horizontalDelta);
+    }
+    if (verticalDelta !== 0) {
+      scroll.scrollTop = Math.max(0, scroll.scrollTop + verticalDelta);
+    }
   }
 
   private cellAt(coordinate: SheetCoordinate): HTMLTableCellElement | null {
