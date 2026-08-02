@@ -8,6 +8,8 @@ export default defineConfig({
     preview: 'src/preview/index.ts',
     presentation: 'src/presentation/index.ts',
     document: 'src/document/index.ts',
+    editor: 'src/editor/index.ts',
+    interaction: 'src/interaction/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

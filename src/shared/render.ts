@@ -6,6 +6,7 @@ import {
 } from '../presentation/presentation';
 
 import { columnLabel } from './column-label';
+import { createSheetMergeIndex, type SheetMergeIndex } from './merge-index';
 import { tableStyles } from './table.styles';
 
 import type { CsvParseResult } from '../csv';
@@ -16,11 +17,6 @@ export interface TableRenderOptions {
   label: string;
   emptyMessage: string;
   presentation: SheetPresentation;
-}
-
-interface MergeIndex {
-  anchors: Map<string, SheetCellRange>;
-  covered: Set<string>;
 }
 
 export function renderTable(
@@ -58,7 +54,7 @@ export function renderTable(
     return;
   }
 
-  const mergeIndex = indexMerges(merges);
+  const mergeIndex = createSheetMergeIndex(merges);
   const scroll = document.createElement('div');
   scroll.className = 'sheet-surface__scroll';
   scroll.tabIndex = 0;
@@ -89,8 +85,8 @@ export function renderTable(
 
     const cells = model.rows[rowIndex];
     for (let columnIndex = 0; columnIndex < model.maxColumns; columnIndex += 1) {
-      if (mergeIndex.covered.has(cellKey(rowIndex, columnIndex))) continue;
-      const range = mergeIndex.anchors.get(cellKey(rowIndex, columnIndex));
+      if (mergeIndex.isCovered(rowIndex, columnIndex)) continue;
+      const range = mergeIndex.anchorAt(rowIndex, columnIndex);
       row.append(createCell('td', cells[columnIndex] ?? '', rowIndex, columnIndex, range));
     }
     body.append(row);
@@ -115,23 +111,7 @@ export function renderTable(
   root.replaceChildren(style, surface);
 }
 
-function indexMerges(merges: readonly SheetCellRange[]): MergeIndex {
-  const anchors = new Map<string, SheetCellRange>();
-  const covered = new Set<string>();
-  for (const range of merges) {
-    anchors.set(cellKey(range.startRow, range.startColumn), range);
-    for (let row = range.startRow; row < range.endRow; row += 1) {
-      for (let column = range.startColumn; column < range.endColumn; column += 1) {
-        if (row !== range.startRow || column !== range.startColumn) {
-          covered.add(cellKey(row, column));
-        }
-      }
-    }
-  }
-  return { anchors, covered };
-}
-
-function appendColumnGroups(
+export function appendColumnGroups(
   table: HTMLTableElement,
   columnCount: number,
   addressed: boolean,
@@ -173,7 +153,7 @@ function appendDataColumns(group: HTMLTableColElement, count: number): void {
   }
 }
 
-function createAddressedHead(columnCount: number): HTMLTableSectionElement {
+export function createAddressedHead(columnCount: number): HTMLTableSectionElement {
   const head = document.createElement('thead');
   const row = document.createElement('tr');
   const corner = document.createElement('th');
@@ -195,20 +175,20 @@ function createAddressedHead(columnCount: number): HTMLTableSectionElement {
 function createGridHead(
   cells: readonly string[],
   columnCount: number,
-  mergeIndex: MergeIndex
+  mergeIndex: SheetMergeIndex
 ): HTMLTableSectionElement {
   const head = document.createElement('thead');
   const row = document.createElement('tr');
   for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
-    if (mergeIndex.covered.has(cellKey(0, columnIndex))) continue;
-    const range = mergeIndex.anchors.get(cellKey(0, columnIndex));
+    if (mergeIndex.isCovered(0, columnIndex)) continue;
+    const range = mergeIndex.anchorAt(0, columnIndex);
     row.append(createCell('th', cells[columnIndex] ?? '', 0, columnIndex, range, true));
   }
   head.append(row);
   return head;
 }
 
-function createCell(
+export function createCell(
   tag: 'td' | 'th',
   value: string,
   rowIndex: number,
@@ -235,13 +215,16 @@ function createCell(
   return cell;
 }
 
-function createTruncationNotice(materializedRows: number, totalRows: number): HTMLParagraphElement {
+export function createTruncationNotice(
+  materializedRows: number,
+  totalRows: number
+): HTMLParagraphElement {
   const notice = createStatusNotice('sheet-truncation-notice');
   notice.textContent = `Showing first ${materializedRows.toLocaleString('en-US')} of ${totalRows.toLocaleString('en-US')} rows.`;
   return notice;
 }
 
-function createInvalidPresentationNotice(): HTMLParagraphElement {
+export function createInvalidPresentationNotice(): HTMLParagraphElement {
   const notice = createStatusNotice('sheet-presentation-notice');
   notice.textContent = 'Merged-cell presentation is invalid; showing unmerged cells.';
   return notice;
@@ -256,14 +239,10 @@ function createStatusNotice(id: string): HTMLParagraphElement {
   return notice;
 }
 
-function createMessage(message: string, kind: 'empty' | 'error'): HTMLElement {
+export function createMessage(message: string, kind: 'empty' | 'error'): HTMLElement {
   const state = document.createElement('div');
   state.className = `sheet-surface__message sheet-surface__message--${kind}`;
   if (kind === 'error') state.setAttribute('role', 'alert');
   state.textContent = message;
   return state;
-}
-
-function cellKey(row: number, column: number): string {
-  return `${row}:${column}`;
 }

@@ -1,3 +1,4 @@
+import './editor';
 import './grid';
 import './preview';
 
@@ -11,8 +12,24 @@ export type {
   SheetDocumentInput,
   SheetDocumentParseResult,
 } from './document';
+export { SheetEditor } from './editor/sheet-editor';
 export { SheetGrid } from './grid/sheet-grid';
 export type { SheetGridDataOptions } from './grid/sheet-grid';
+export {
+  createSheetMergeIndex,
+  createSheetSelection,
+  moveSheetSelection,
+  resolveSheetCoordinate,
+  resolveSheetUnit,
+  sheetRangesIntersect,
+} from './interaction';
+export type {
+  SheetCanvasBounds,
+  SheetCoordinate,
+  SheetMergeIndex,
+  SheetMoveDirection,
+  SheetSelection,
+} from './interaction';
 export {
   formatA1Range,
   MAX_SHEET_MERGES,

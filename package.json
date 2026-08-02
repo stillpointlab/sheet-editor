@@ -1,17 +1,21 @@
 {
   "name": "@stillpointlab/sheet-editor",
   "version": "0.1.0",
-  "description": "Sheet document codecs and read-only spreadsheet-style grid web components.",
+  "description": "Sheet document codecs and spreadsheet-style grid web components.",
   "license": "MIT",
   "type": "module",
   "sideEffects": [
     "./src/index.ts",
+    "./src/editor/index.ts",
+    "./src/editor/sheet-editor.ts",
     "./src/grid/index.ts",
     "./src/grid/sheet-grid.ts",
     "./src/preview/index.ts",
     "./src/preview/sheet-preview.ts",
     "./dist/index.js",
     "./dist/index.cjs",
+    "./dist/editor.js",
+    "./dist/editor.cjs",
     "./dist/grid.js",
     "./dist/grid.cjs",
     "./dist/preview.js",
@@ -47,6 +51,16 @@
       "types": "./dist/document.d.ts",
       "import": "./dist/document.js",
       "require": "./dist/document.cjs"
+    },
+    "./editor": {
+      "types": "./dist/editor.d.ts",
+      "import": "./dist/editor.js",
+      "require": "./dist/editor.cjs"
+    },
+    "./interaction": {
+      "types": "./dist/interaction.d.ts",
+      "import": "./dist/interaction.js",
+      "require": "./dist/interaction.cjs"
     }
   },
   "main": "./dist/index.js",
@@ -58,7 +72,9 @@
     "grid.d.ts",
     "preview.d.ts",
     "presentation.d.ts",
-    "document.d.ts"
+    "document.d.ts",
+    "editor.d.ts",
+    "interaction.d.ts"
   ],
   "scripts": {
     "gen:styles": "node scripts/gen-styles.mjs",

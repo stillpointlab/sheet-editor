@@ -52,7 +52,8 @@
       }
 
       sheet-preview,
-      sheet-grid {
+      sheet-grid,
+      sheet-editor {
         --spl-sheet-background: #ffffff;
         --spl-sheet-header-background: #f6f8fa;
         --spl-sheet-text: #1f2933;
@@ -61,7 +62,8 @@
       }
 
       body.dark sheet-preview,
-      body.dark sheet-grid {
+      body.dark sheet-grid,
+      body.dark sheet-editor {
         --spl-sheet-background: #0d1117;
         --spl-sheet-header-background: #161b22;
         --spl-sheet-text: #e6edf3;
@@ -76,6 +78,7 @@
       <label>
         Fixture
         <select id="fixture">
+          <option value="empty">Empty virtual A1</option>
           <option value="regular">Quoted and ragged</option>
           <option value="wide">Columns beyond Z</option>
           <option value="truncated">1,001 rows</option>
@@ -97,6 +100,10 @@
     </div>
 
     <div class="fixture">
+      <section>
+        <h2>Interactive sheet selection</h2>
+        <div class="pane"><sheet-editor id="editor"></sheet-editor></div>
+      </section>
       <section>
         <h2>A1 sheet preview</h2>
         <div class="pane"><sheet-preview id="preview"></sheet-preview></div>
