@@ -88,10 +88,13 @@ The editor provides a fast-entry keyboard profile:
 | Arrow / Shift+Arrow | Move / extend selection           |
 | Ctrl/Cmd+Z          | Undo a committed cell transaction |
 
-While editing, Escape cancels; Enter/Shift+Enter commit and move down/up; and an unmodified arrow
-commits and moves in that direction. Tab commits through ordinary focus traversal rather than
-trapping focus inside the grid. A separate caret-edit slice adds conventional in-cell arrow
-movement.
+Quick edit assigns Escape to cancel, Enter/Shift+Enter to commit and move down/up, and an unmodified
+arrow to commit and move in that direction. F2 or double-click switches to caret edit, where arrows,
+Home/End, text selection, clipboard commands, and native undo remain ordinary textarea behavior.
+Alt/Option+Enter inserts one LF line break without leaving the cell. Plain Enter still commits and
+moves down. Ctrl/Command+Enter remains unassigned for a future range-fill command.
+
+Tab commits through ordinary focus traversal rather than trapping focus inside the grid.
 
 `getContent()` and `content-change` include the open draft so hosts can autosave safely. No-op,
 cancel, and undo-to-baseline restore the original CSV byte-for-byte. A real edit preserves BOM,
