@@ -9,6 +9,7 @@ surfaces.
 - `@stillpointlab/sheet-editor/grid` — registers `<sheet-grid>`, a gutterless data table
 - `@stillpointlab/sheet-editor/preview` — registers `<sheet-preview>`, an A1-style cells pane
 - `@stillpointlab/sheet-editor/presentation` — side-effect-free merged-range validation
+- `@stillpointlab/sheet-editor/document` — side-effect-free strict `.sheet` parsing and serialization
 - `@stillpointlab/sheet-editor` — registers and exports both preview-facing elements
 
 ## Usage
@@ -53,6 +54,36 @@ grid.setData(
   }
 );
 ```
+
+## `.sheet` documents
+
+The versioned `.sheet` envelope keeps a CSV body and merged-cell presentation in one text document:
+
+```text
+---
+sheet: stillpoint/v1
+format: csv
+presentation:
+  merges:
+    - range: A1:C1
+---
+Quarter,Revenue,Cost
+Q1,1200,800
+```
+
+Parse the document explicitly and pass its structured result to either element. Plain CSV remains
+plain CSV and is never sniffed for an envelope.
+
+```ts
+import { parseSheetDocument } from '@stillpointlab/sheet-editor/document';
+import '@stillpointlab/sheet-editor/preview';
+
+const parsed = parseSheetDocument(source);
+if (parsed.ok) preview.setDocument(parsed.document);
+```
+
+An optional call-site presentation inherits embedded merges when omitted, suppresses them with
+`null` or `{ merges: [] }`, and replaces the complete merge section when ranges are supplied.
 
 The package is preview-only. CSV editing, formulas, cell selection, and workbook formats are
 deliberately outside the MVP.

@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
+import { parseSheetDocument } from '../document';
 import { setErrorHandler } from '../log';
 
 import { SheetGrid } from './sheet-grid';
@@ -202,5 +203,66 @@ describe('sheet-grid', () => {
 
     expect(element.shadowRoot?.querySelector('thead')).toBeNull();
     expect(element.shadowRoot?.querySelector('td')?.colSpan).toBe(2);
+  });
+
+  it('inherits, suppresses, and replaces embedded document merges', () => {
+    const parsed = parseSheetDocument(
+      [
+        '---',
+        'sheet: stillpoint/v1',
+        'presentation:',
+        '  merges:',
+        '    - range: A1:B1',
+        '---',
+        'anchor,',
+        ',',
+        ',',
+      ].join('\n')
+    );
+    if (!parsed.ok) throw new Error('expected document parse to succeed');
+    const element = create();
+    document.body.append(element);
+
+    element.setDocument(parsed.document);
+    expect(element.shadowRoot?.querySelector('td')?.colSpan).toBe(2);
+
+    element.setDocument(parsed.document, { presentation: null });
+    expect(element.shadowRoot?.querySelectorAll('td')).toHaveLength(6);
+
+    element.setDocument(parsed.document, { presentation: {} });
+    expect(element.shadowRoot?.querySelector('td')?.colSpan).toBe(2);
+
+    element.setDocument(parsed.document, { presentation: { merges: undefined } });
+    expect(element.shadowRoot?.querySelector('td')?.colSpan).toBe(2);
+
+    element.setDocument(parsed.document, { presentation: { merges: [] } });
+    expect(element.shadowRoot?.querySelectorAll('td')).toHaveLength(6);
+
+    element.setDocument(parsed.document, {
+      presentation: {
+        merges: [{ startRow: 0, endRow: 2, startColumn: 0, endColumn: 1 }],
+      },
+    });
+    expect(element.shadowRoot?.querySelector('td')?.rowSpan).toBe(2);
+    expect(element.shadowRoot?.querySelector('td')?.colSpan).toBe(1);
+
+    element.setContent('plain,again');
+    expect(element.shadowRoot?.querySelectorAll('td')).toHaveLength(2);
+  });
+
+  it('snapshots parsed document data and presentation before rendering', () => {
+    const parsed = parseSheetDocument(
+      '---\nsheet: stillpoint/v1\npresentation:\n  merges:\n    - range: A1:B1\n---\nanchor,'
+    );
+    if (!parsed.ok) throw new Error('expected document parse to succeed');
+    const element = create();
+    element.setDocument(parsed.document);
+    parsed.document.data.rows[0][0] = 'mutated';
+    parsed.document.presentation.merges[0].endColumn = 1;
+    document.body.append(element);
+
+    const anchor = element.shadowRoot?.querySelector<HTMLTableCellElement>('td');
+    expect(anchor?.textContent).toBe('anchor');
+    expect(anchor?.colSpan).toBe(2);
   });
 });

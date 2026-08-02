@@ -46,3 +46,15 @@ export function modelFromRows(
     truncated: sourceRows.length > rows.length,
   };
 }
+
+export function snapshotSuccessfulModel(
+  source: Extract<CsvParseResult, { ok: true }>
+): CsvParseResult {
+  return {
+    ok: true,
+    rows: source.rows.map((row) => [...row]),
+    totalRows: source.totalRows,
+    maxColumns: source.maxColumns,
+    truncated: source.truncated,
+  };
+}
