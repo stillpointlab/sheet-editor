@@ -15,6 +15,7 @@ describe('parseCsv', () => {
       totalRows: 2,
       maxColumns: 3,
       truncated: false,
+      sourceStyle: { bom: false, lineEnding: '\r\n', finalRecordTerminated: false },
     });
   });
 
@@ -39,6 +40,36 @@ describe('parseCsv', () => {
       ok: true,
       rows: [['a', 'b', 'c'], ['1'], ['2', '3']],
       maxColumns: 3,
+    });
+  });
+
+  it('captures BOM, record-ending majority/ties, and final termination outside quotes', () => {
+    expect(parseCsv('\uFEFFa\nb\r\nc\n')).toMatchObject({
+      ok: true,
+      sourceStyle: { bom: true, lineEnding: '\n', finalRecordTerminated: true },
+    });
+    expect(parseCsv('a\r\nb\nc')).toMatchObject({
+      ok: true,
+      sourceStyle: { bom: false, lineEnding: '\r\n', finalRecordTerminated: false },
+    });
+    expect(parseCsv('"inside\ncell"')).toMatchObject({
+      ok: true,
+      sourceStyle: { bom: false, lineEnding: '\r\n', finalRecordTerminated: false },
+    });
+    expect(parseCsv('"inside\ncell"\n')).toMatchObject({
+      ok: true,
+      sourceStyle: { bom: false, lineEnding: '\n', finalRecordTerminated: true },
+    });
+  });
+
+  it('uses default source style for empty and BOM-only input', () => {
+    expect(parseCsv('')).toMatchObject({
+      ok: true,
+      sourceStyle: { bom: false, lineEnding: '\r\n', finalRecordTerminated: false },
+    });
+    expect(parseCsv('\uFEFF')).toMatchObject({
+      ok: true,
+      sourceStyle: { bom: true, lineEnding: '\r\n', finalRecordTerminated: false },
     });
   });
 
@@ -133,6 +164,15 @@ describe('serializeCsv', () => {
     expect(serializeCsv([['café']])).toBe('café');
     expect(serializeCsv([['café']], { bom: true })).toBe('\uFEFFcafé');
     expect(serializeCsv([], { bom: true })).toBe('\uFEFF');
+  });
+
+  it('optionally terminates the final record without inventing one for zero rows', () => {
+    expect(serializeCsv([['a'], ['b']], { terminateFinalRecord: true })).toBe('a\r\nb\r\n');
+    expect(
+      serializeCsv([['a'], ['b']], { lineEnding: '\n', terminateFinalRecord: true, bom: true })
+    ).toBe('\uFEFFa\nb\n');
+    expect(serializeCsv([], { terminateFinalRecord: true })).toBe('');
+    expect(serializeCsv([[]], { terminateFinalRecord: true })).toBe('\r\n');
   });
 
   it('escapes formula-trigger values only when requested', () => {

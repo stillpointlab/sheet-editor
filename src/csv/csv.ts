@@ -13,6 +13,12 @@ export interface CsvParseError {
   message: string;
 }
 
+export interface CsvSourceStyle {
+  bom: boolean;
+  lineEnding: '\r\n' | '\n';
+  finalRecordTerminated: boolean;
+}
+
 export type CsvParseResult =
   | {
       ok: true;
@@ -20,6 +26,7 @@ export type CsvParseResult =
       totalRows: number;
       maxColumns: number;
       truncated: boolean;
+      sourceStyle: CsvSourceStyle;
     }
   | {
       ok: false;
@@ -30,6 +37,7 @@ export interface CsvSerializeOptions {
   bom?: boolean;
   escapeFormulas?: boolean;
   lineEnding?: '\r\n' | '\n';
+  terminateFinalRecord?: boolean;
 }
 
 export const DEFAULT_CSV_LIMITS: Readonly<CsvLimits> = Object.freeze({
@@ -55,7 +63,8 @@ export function parseCsv(source: string, overrides: Partial<CsvLimits> = {}): Cs
     );
   }
 
-  const input = source.startsWith('\uFEFF') ? source.slice(1) : source;
+  const bom = source.startsWith('\uFEFF');
+  const input = bom ? source.slice(1) : source;
   if (input === '') {
     return {
       ok: true,
@@ -63,6 +72,7 @@ export function parseCsv(source: string, overrides: Partial<CsvLimits> = {}): Cs
       totalRows: 0,
       maxColumns: 0,
       truncated: false,
+      sourceStyle: defaultSourceStyle(bom),
     };
   }
 
@@ -78,6 +88,9 @@ export function parseCsv(source: string, overrides: Partial<CsvLimits> = {}): Cs
   let closedQuote = false;
   let endedWithRecordDelimiter = false;
   let parseFailure: CsvParseResult | null = null;
+  let lfCount = 0;
+  let crlfCount = 0;
+  let firstLineEnding: '\r\n' | '\n' | null = null;
 
   const location = (): string => `row ${totalRows + 1}, column ${columnsInRow + 1}`;
 
@@ -119,6 +132,12 @@ export function parseCsv(source: string, overrides: Partial<CsvLimits> = {}): Cs
     columnsInRow = 0;
   };
 
+  const recordLineEnding = (lineEnding: '\r\n' | '\n'): void => {
+    firstLineEnding ??= lineEnding;
+    if (lineEnding === '\r\n') crlfCount += 1;
+    else lfCount += 1;
+  };
+
   let index = 0;
   while (index < input.length && !parseFailure) {
     const ch = input[index];
@@ -153,12 +172,14 @@ export function parseCsv(source: string, overrides: Partial<CsvLimits> = {}): Cs
       }
       if (ch === '\n') {
         finishRow();
+        recordLineEnding('\n');
         endedWithRecordDelimiter = true;
         index += 1;
         continue;
       }
       if (ch === '\r' && input[index + 1] === '\n') {
         finishRow();
+        recordLineEnding('\r\n');
         endedWithRecordDelimiter = true;
         index += 2;
         continue;
@@ -194,6 +215,7 @@ export function parseCsv(source: string, overrides: Partial<CsvLimits> = {}): Cs
 
     if (ch === '\n') {
       finishRow();
+      recordLineEnding('\n');
       endedWithRecordDelimiter = true;
       index += 1;
       continue;
@@ -208,6 +230,7 @@ export function parseCsv(source: string, overrides: Partial<CsvLimits> = {}): Cs
         break;
       }
       finishRow();
+      recordLineEnding('\r\n');
       endedWithRecordDelimiter = true;
       index += 2;
       continue;
@@ -237,6 +260,12 @@ export function parseCsv(source: string, overrides: Partial<CsvLimits> = {}): Cs
     totalRows,
     maxColumns,
     truncated: totalRows > rows.length,
+    sourceStyle: {
+      bom,
+      lineEnding:
+        crlfCount === lfCount ? (firstLineEnding ?? '\r\n') : crlfCount > lfCount ? '\r\n' : '\n',
+      finalRecordTerminated: endedWithRecordDelimiter,
+    },
   };
 }
 
@@ -260,7 +289,13 @@ export function serializeCsv(
     )
     .join(lineEnding);
 
-  return `${options.bom ? '\uFEFF' : ''}${content}`;
+  const terminated =
+    options.terminateFinalRecord && rows.length > 0 ? `${content}${lineEnding}` : content;
+  return `${options.bom ? '\uFEFF' : ''}${terminated}`;
+}
+
+function defaultSourceStyle(bom: boolean): CsvSourceStyle {
+  return { bom, lineEnding: '\r\n', finalRecordTerminated: false };
 }
 
 function resolveLimits(overrides: Partial<CsvLimits>): CsvLimits {

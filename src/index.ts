@@ -13,6 +13,7 @@ export type {
   SheetDocumentParseResult,
 } from './document';
 export { SheetEditor } from './editor/sheet-editor';
+export type { SheetEditorMode } from './editor/sheet-editor';
 export { SheetGrid } from './grid/sheet-grid';
 export type { SheetGridDataOptions } from './grid/sheet-grid';
 export {

@@ -6,4 +6,5 @@ export type {
   CsvParseErrorCode,
   CsvParseResult,
   CsvSerializeOptions,
+  CsvSourceStyle,
 } from './csv';

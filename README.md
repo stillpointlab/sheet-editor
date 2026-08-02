@@ -76,9 +76,26 @@ document.body.append(editor);
 editor.focus();
 ```
 
-The interaction-only editor preserves `getContent()` byte-for-byte and emits no content events.
 Empty and ragged CSV expose one bounded virtual authoring row/column, but selection alone never
-materializes those cells. Value editing follows in separate package slices.
+materializes those cells.
+
+The editor provides a fast-entry keyboard profile:
+
+| Key in navigation   | Result                            |
+| ------------------- | --------------------------------- |
+| Enter               | Edit the active value             |
+| Printable character | Replace the active value and edit |
+| Arrow / Shift+Arrow | Move / extend selection           |
+| Ctrl/Cmd+Z          | Undo a committed cell transaction |
+
+While editing, Escape cancels; Enter/Shift+Enter commit and move down/up; and an unmodified arrow
+commits and moves in that direction. Tab commits through ordinary focus traversal rather than
+trapping focus inside the grid. A separate caret-edit slice adds conventional in-cell arrow
+movement.
+
+`getContent()` and `content-change` include the open draft so hosts can autosave safely. No-op,
+cancel, and undo-to-baseline restore the original CSV byte-for-byte. A real edit preserves BOM,
+dominant record ending, and final-record termination while safely canonicalizing CSV quoting.
 
 ## `.sheet` documents
 

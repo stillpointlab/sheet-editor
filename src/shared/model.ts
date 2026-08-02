@@ -44,6 +44,7 @@ export function modelFromRows(
     totalRows: sourceRows.length,
     maxColumns,
     truncated: sourceRows.length > rows.length,
+    sourceStyle: { bom: false, lineEnding: '\r\n', finalRecordTerminated: false },
   };
 }
 
@@ -56,5 +57,6 @@ export function snapshotSuccessfulModel(
     totalRows: source.totalRows,
     maxColumns: source.maxColumns,
     truncated: source.truncated,
+    sourceStyle: { ...source.sourceStyle },
   };
 }
