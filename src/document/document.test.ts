@@ -23,6 +23,7 @@ describe('parseSheetDocument', () => {
           totalRows: 2,
           maxColumns: 2,
           truncated: false,
+          sourceStyle: { bom: false, lineEnding: '\n', finalRecordTerminated: false },
         },
         presentation: { merges: [] },
       },

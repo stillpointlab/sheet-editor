@@ -26,6 +26,7 @@ interface Fixture {
 
 const fixtures: Record<string, Fixture> = {
   empty: { source: '' },
+  'bom-lf': { source: '\uFEFFName,Value\nCoffee,12\n' },
   regular: { source: regular },
   wide: { source: Array.from({ length: 30 }, (_, index) => `Column ${index + 1}`).join(',') },
   truncated: {
@@ -91,6 +92,7 @@ const fixtures: Record<string, Fixture> = {
 const preview = document.querySelector('#preview') as SheetPreview;
 const grid = document.querySelector('#grid') as SheetGrid;
 const editor = document.querySelector('#editor') as SheetEditor;
+const editorContent = document.querySelector('#editor-content') as HTMLElement;
 const fixture = document.querySelector('#fixture') as HTMLSelectElement;
 const panes = [...document.querySelectorAll('.pane')];
 
@@ -107,12 +109,18 @@ function render(): void {
           ? parsed.document.presentation
           : selected.documentOverride,
     });
+    editorContent.textContent = editor.getContent();
     return;
   }
   preview.setContent(selected.source, { presentation: selected.presentation });
   grid.setContent(selected.source, { presentation: selected.presentation });
   editor.setContent(selected.source, { presentation: selected.presentation });
+  editorContent.textContent = editor.getContent();
 }
+
+editor.addEventListener('content-change', () => {
+  editorContent.textContent = editor.getContent();
+});
 
 fixture.addEventListener('change', render);
 document.querySelector('#width')?.addEventListener('click', () => {

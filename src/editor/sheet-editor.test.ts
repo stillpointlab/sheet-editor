@@ -138,7 +138,7 @@ describe('sheet-editor interaction foundation', () => {
     const grid = element.shadowRoot?.querySelector('table');
     expect(grid?.getAttribute('role')).toBe('grid');
     expect(grid?.getAttribute('aria-multiselectable')).toBe('true');
-    expect(grid?.getAttribute('aria-readonly')).toBe('true');
+    expect(grid?.getAttribute('aria-readonly')).toBe('false');
     expect(dataCells(element).filter((cell) => cell.tabIndex === 0)).toHaveLength(1);
     expect(element.shadowRoot?.querySelectorAll('th[tabindex]')).toHaveLength(0);
 

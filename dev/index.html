@@ -79,6 +79,7 @@
         Fixture
         <select id="fixture">
           <option value="empty">Empty virtual A1</option>
+          <option value="bom-lf">BOM + LF + final newline</option>
           <option value="regular">Quoted and ragged</option>
           <option value="wide">Columns beyond Z</option>
           <option value="truncated">1,001 rows</option>
@@ -103,6 +104,11 @@
       <section>
         <h2>Interactive sheet selection</h2>
         <div class="pane"><sheet-editor id="editor"></sheet-editor></div>
+        <p>
+          Enter edits; Escape cancels; Enter/Shift+Enter/arrows commit and move. Direct typing
+          replaces a cell; Ctrl/Cmd+Z undoes in navigation.
+        </p>
+        <pre><code id="editor-content"></code></pre>
       </section>
       <section>
         <h2>A1 sheet preview</h2>

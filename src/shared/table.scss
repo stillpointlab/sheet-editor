@@ -114,6 +114,41 @@
   content: '\00a0';
 }
 
+.sheet-table__cell--editing {
+  position: relative;
+  overflow: visible !important;
+}
+
+.sheet-table__cell--editing > .sheet-table__cell-content {
+  visibility: hidden;
+}
+
+.sheet-editor__input {
+  position: absolute;
+  z-index: 4;
+  inset: -1px;
+  box-sizing: border-box;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  min-height: calc(100% + 2px);
+  margin: 0;
+  padding: 3px;
+  resize: none;
+  overflow: hidden;
+  border: 2px solid var(--spl-sheet-focus, var(--color-focus, #0969da));
+  border-radius: 0;
+  outline: 0;
+  color: inherit;
+  background: var(--spl-sheet-background, var(--color-surface, #ffffff));
+  font: inherit;
+  line-height: inherit;
+  white-space: pre-wrap;
+}
+
+.sheet-editor__limit {
+  color: var(--spl-sheet-danger, var(--color-danger, #b42318));
+}
+
 .sheet-surface--addressed .sheet-table__row-header,
 .sheet-table__corner {
   position: sticky;
