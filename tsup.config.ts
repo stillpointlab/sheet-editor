@@ -7,6 +7,7 @@ export default defineConfig({
     grid: 'src/grid/index.ts',
     preview: 'src/preview/index.ts',
     presentation: 'src/presentation/index.ts',
+    document: 'src/document/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,

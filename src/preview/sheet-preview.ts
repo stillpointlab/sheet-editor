@@ -2,11 +2,15 @@
 
 import { parseCsv, type CsvParseResult } from '../csv';
 import {
+  resolveSheetPresentation,
   snapshotSheetPresentation,
   type SheetContentOptions,
   type SheetPresentation,
 } from '../presentation/presentation';
+import { snapshotSuccessfulModel } from '../shared/model';
 import { renderTable } from '../shared/render';
+
+import type { ParsedSheetDocument } from '../document';
 
 export class SheetPreview extends HTMLElement {
   private readonly root: ShadowRoot;
@@ -25,6 +29,12 @@ export class SheetPreview extends HTMLElement {
   setContent(content: string, options: SheetContentOptions = {}): void {
     this.model = parseCsv(content);
     this.presentation = snapshotSheetPresentation(options.presentation);
+    if (this.isConnected) this.render();
+  }
+
+  setDocument(document: ParsedSheetDocument, options: SheetContentOptions = {}): void {
+    this.model = snapshotSuccessfulModel(document.data);
+    this.presentation = resolveSheetPresentation(document.presentation, options.presentation);
     if (this.isConnected) this.render();
   }
 

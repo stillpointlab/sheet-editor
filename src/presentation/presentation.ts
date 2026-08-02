@@ -210,6 +210,23 @@ export function snapshotSheetPresentation(
   return snapshot as SheetPresentation;
 }
 
+export function resolveSheetPresentation(
+  embedded: SheetPresentation,
+  override: SheetPresentation | null | undefined
+): SheetPresentation {
+  if (override === undefined) return snapshotSheetPresentation(embedded);
+  if (override === null) return {};
+  if (!isRecord(override)) return snapshotSheetPresentation(override);
+
+  const embeddedSnapshot = snapshotSheetPresentation(embedded) as Record<string, unknown>;
+  const overrideSnapshot = snapshotSheetPresentation(override) as Record<string, unknown>;
+  const resolved = { ...embeddedSnapshot, ...overrideSnapshot };
+  if (!Object.hasOwn(override, 'merges') || override.merges === undefined) {
+    resolved.merges = embeddedSnapshot.merges;
+  }
+  return resolved as SheetPresentation;
+}
+
 function assertValidationContext(context: SheetPresentationValidationContext): void {
   if (!isRecord(context) || !Array.isArray(context.rows)) {
     throw new TypeError('Sheet presentation validation context must contain rows.');

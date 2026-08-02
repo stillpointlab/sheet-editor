@@ -1,6 +1,8 @@
 import '../src/grid';
 import '../src/preview';
 
+import { parseSheetDocument } from '../src/document';
+
 import type { SheetGrid } from '../src/grid';
 import type { SheetPresentation } from '../src/presentation';
 import type { SheetPreview } from '../src/preview';
@@ -15,6 +17,8 @@ const regular = [
 interface Fixture {
   source: string;
   presentation?: SheetPresentation;
+  documentSource?: string;
+  documentOverride?: SheetPresentation | null;
 }
 
 const fixtures: Record<string, Fixture> = {
@@ -55,6 +59,29 @@ const fixtures: Record<string, Fixture> = {
       merges: [{ startRow: 1, endRow: 2, startColumn: 0, endColumn: 2 }],
     },
   },
+  'document-default': {
+    source: '',
+    documentSource:
+      '---\nsheet: stillpoint/v1\npresentation:\n  merges:\n    - range: A1:B1\n---\nEmbedded merge,\nOne,Two',
+  },
+  'document-explicit': {
+    source: '',
+    documentSource:
+      '---\nsheet: stillpoint/v1\nformat: csv\npresentation:\n  merges:\n    - range: A2:A3\n---\nHeader A,Header B\nTall value,One\n,Two',
+  },
+  'document-override': {
+    source: '',
+    documentSource:
+      '---\nsheet: stillpoint/v1\npresentation:\n  merges:\n    - range: A1:B1\n---\nHeader A,\nReplacement,One\n,Two',
+    documentOverride: {
+      merges: [{ startRow: 1, endRow: 3, startColumn: 0, endColumn: 1 }],
+    },
+  },
+  'document-invalid': {
+    source: '',
+    documentSource:
+      '---\nsheet: stillpoint/v1\npresentation:\n  merges:\n    - range: A2:B2\n---\nHeader A,Header B\nVisible,Would be hidden',
+  },
 };
 
 const preview = document.querySelector('#preview') as SheetPreview;
@@ -64,6 +91,13 @@ const panes = [...document.querySelectorAll('.pane')];
 
 function render(): void {
   const selected = fixtures[fixture.value] ?? fixtures.regular;
+  if (selected.documentSource !== undefined) {
+    const parsed = parseSheetDocument(selected.documentSource);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    preview.setDocument(parsed.document, { presentation: selected.documentOverride });
+    grid.setDocument(parsed.document, { presentation: selected.documentOverride });
+    return;
+  }
   preview.setContent(selected.source, { presentation: selected.presentation });
   grid.setContent(selected.source, { presentation: selected.presentation });
 }

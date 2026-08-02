@@ -2,12 +2,15 @@
 
 import { parseCsv, type CsvParseResult } from '../csv';
 import {
+  resolveSheetPresentation,
   snapshotSheetPresentation,
   type SheetContentOptions,
   type SheetPresentation,
 } from '../presentation/presentation';
-import { modelFromRows } from '../shared/model';
+import { modelFromRows, snapshotSuccessfulModel } from '../shared/model';
 import { renderTable } from '../shared/render';
+
+import type { ParsedSheetDocument } from '../document';
 
 export interface SheetGridDataOptions extends SheetContentOptions {
   headerRow?: boolean;
@@ -49,6 +52,14 @@ export class SheetGrid extends HTMLElement {
       options.headerRow === undefined ? undefined : Boolean(options.headerRow);
     this.model = modelFromRows(rows);
     this.presentation = snapshotSheetPresentation(options.presentation);
+    if (this.isConnected) this.render();
+  }
+
+  setDocument(document: ParsedSheetDocument, options: SheetGridDataOptions = {}): void {
+    this.headerRowOverride =
+      options.headerRow === undefined ? undefined : Boolean(options.headerRow);
+    this.model = snapshotSuccessfulModel(document.data);
+    this.presentation = resolveSheetPresentation(document.presentation, options.presentation);
     if (this.isConnected) this.render();
   }
 
