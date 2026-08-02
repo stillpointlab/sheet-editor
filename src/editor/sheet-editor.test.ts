@@ -146,6 +146,38 @@ describe('sheet-editor interaction foundation', () => {
     expect(element.shadowRoot?.activeElement).toBe(activeCell(element));
   });
 
+  it('scrolls the active cell clear of the sticky address gutters', () => {
+    const element = create();
+    element.setContent('a,b');
+    document.body.append(element);
+
+    const scroll = element.shadowRoot?.querySelector<HTMLElement>('.sheet-surface__scroll');
+    const rowHeader = element.shadowRoot?.querySelector<HTMLElement>('.sheet-table__row-header');
+    const columnHeader = element.shadowRoot?.querySelector<HTMLElement>(
+      '.sheet-table__column-header'
+    );
+    if (!scroll || !rowHeader || !columnHeader) throw new Error('expected addressed sheet chrome');
+
+    vi.spyOn(scroll, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 320, 200));
+    vi.spyOn(rowHeader, 'getBoundingClientRect').mockReturnValue(rect(0, 20, 36, 40));
+    vi.spyOn(columnHeader, 'getBoundingClientRect').mockReturnValue(rect(36, 0, 196, 20));
+    vi.spyOn(dataCell(element, 0, 1), 'getBoundingClientRect').mockReturnValue(
+      rect(300, 20, 460, 40)
+    );
+
+    activeCell(element).dispatchEvent(key('ArrowRight'));
+    expect(scroll.scrollLeft).toBe(140);
+
+    scroll.scrollLeft = 160;
+    vi.spyOn(dataCell(element, 0, 0), 'getBoundingClientRect').mockReturnValue(
+      rect(0, 20, 160, 40)
+    );
+    activeCell(element).dispatchEvent(key('ArrowLeft'));
+
+    expect(scroll.scrollLeft).toBe(124);
+    expect(activeCell(element).dataset.column).toBe('0');
+  });
+
   it('falls back to selectable unmerged cells and reports invalid presentation once', () => {
     const report = vi.fn();
     setErrorHandler(report);
@@ -242,4 +274,18 @@ function pointer(type: string, pointerId = 1): Event {
 
 function pointerDown(cell: HTMLTableCellElement): void {
   cell.dispatchEvent(pointer('pointerdown'));
+}
+
+function rect(left: number, top: number, right: number, bottom: number): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+    toJSON: () => ({}),
+  } as DOMRect;
 }
