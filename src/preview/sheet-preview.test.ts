@@ -82,4 +82,20 @@ describe('sheet-preview', () => {
       'Showing first 1,000 of 1,001 rows.'
     );
   });
+
+  it('renders vertical merges without removing addressed gutters', () => {
+    const element = create();
+    element.setContent('anchor,\n,', {
+      presentation: {
+        merges: [{ startRow: 0, endRow: 2, startColumn: 0, endColumn: 1 }],
+      },
+    });
+    document.body.append(element);
+
+    const anchor = element.shadowRoot?.querySelector<HTMLTableCellElement>('tbody td');
+    expect(anchor?.rowSpan).toBe(2);
+    expect(element.shadowRoot?.querySelectorAll('.sheet-table__row-header')).toHaveLength(2);
+    expect(element.shadowRoot?.querySelectorAll('.sheet-table__column-header')).toHaveLength(2);
+    expect(element.shadowRoot?.querySelectorAll('tbody td')).toHaveLength(3);
+  });
 });

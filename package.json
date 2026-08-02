@@ -37,6 +37,11 @@
       "types": "./dist/preview.d.ts",
       "import": "./dist/preview.js",
       "require": "./dist/preview.cjs"
+    },
+    "./presentation": {
+      "types": "./dist/presentation.d.ts",
+      "import": "./dist/presentation.js",
+      "require": "./dist/presentation.cjs"
     }
   },
   "main": "./dist/index.js",
@@ -46,7 +51,8 @@
     "dist",
     "csv.d.ts",
     "grid.d.ts",
-    "preview.d.ts"
+    "preview.d.ts",
+    "presentation.d.ts"
   ],
   "scripts": {
     "gen:styles": "node scripts/gen-styles.mjs",

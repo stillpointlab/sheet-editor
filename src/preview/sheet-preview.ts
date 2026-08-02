@@ -1,11 +1,17 @@
 /// <reference lib="dom" />
 
 import { parseCsv, type CsvParseResult } from '../csv';
+import {
+  snapshotSheetPresentation,
+  type SheetContentOptions,
+  type SheetPresentation,
+} from '../presentation/presentation';
 import { renderTable } from '../shared/render';
 
 export class SheetPreview extends HTMLElement {
   private readonly root: ShadowRoot;
   private model: CsvParseResult = parseCsv('');
+  private presentation: SheetPresentation = {};
 
   constructor() {
     super();
@@ -16,8 +22,9 @@ export class SheetPreview extends HTMLElement {
     this.render();
   }
 
-  setContent(content: string): void {
+  setContent(content: string, options: SheetContentOptions = {}): void {
     this.model = parseCsv(content);
+    this.presentation = snapshotSheetPresentation(options.presentation);
     if (this.isConnected) this.render();
   }
 
@@ -27,6 +34,7 @@ export class SheetPreview extends HTMLElement {
       headerRow: false,
       label: 'Spreadsheet preview',
       emptyMessage: 'No sheet data.',
+      presentation: this.presentation,
     });
   }
 }

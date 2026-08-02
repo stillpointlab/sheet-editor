@@ -1,4 +1,6 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+
+import { setErrorHandler } from '../log';
 
 import { SheetGrid } from './sheet-grid';
 
@@ -8,6 +10,8 @@ describe('sheet-grid', () => {
   });
 
   const create = (): SheetGrid => document.createElement('sheet-grid') as SheetGrid;
+
+  afterEach(() => setErrorHandler(null));
 
   it('renders CSV as a semantic gutterless table and pads ragged rows', () => {
     const element = create();
@@ -105,5 +109,98 @@ describe('sheet-grid', () => {
     const scroll = element.shadowRoot?.querySelector('.sheet-surface__scroll');
     expect(scroll?.getAttribute('tabindex')).toBe('0');
     expect(scroll?.getAttribute('aria-label')).toBe('Data grid');
+  });
+
+  it('renders rectangular ranges with native spans and restores covered cells', () => {
+    const element = create();
+    element.setData(
+      [
+        ['anchor', ''],
+        ['', ''],
+      ],
+      {
+        presentation: {
+          merges: [{ startRow: 0, endRow: 2, startColumn: 0, endColumn: 2 }],
+        },
+      }
+    );
+    document.body.append(element);
+
+    const anchor = element.shadowRoot?.querySelector('td');
+    expect(anchor?.rowSpan).toBe(2);
+    expect(anchor?.colSpan).toBe(2);
+    expect(anchor?.dataset).toMatchObject({ row: '0', column: '0' });
+    expect(element.shadowRoot?.querySelectorAll('tbody td')).toHaveLength(1);
+
+    element.setData([
+      ['anchor', ''],
+      ['', ''],
+    ]);
+    expect(element.shadowRoot?.querySelectorAll('tbody td')).toHaveLength(4);
+  });
+
+  it('uses colgroup semantics for a merged promoted header', () => {
+    const element = create();
+    element.setData(
+      [
+        ['Group', '', 'Other'],
+        ['one', 'two', 'three'],
+      ],
+      {
+        headerRow: true,
+        presentation: {
+          merges: [{ startRow: 0, endRow: 1, startColumn: 0, endColumn: 2 }],
+        },
+      }
+    );
+    document.body.append(element);
+
+    const headers = [...(element.shadowRoot?.querySelectorAll('thead th') ?? [])];
+    expect(headers).toHaveLength(2);
+    expect(headers[0]?.getAttribute('scope')).toBe('colgroup');
+    expect((headers[0] as HTMLTableCellElement).colSpan).toBe(2);
+    expect(element.shadowRoot?.querySelectorAll('colgroup')).toHaveLength(2);
+    expect(element.shadowRoot?.querySelectorAll('col')).toHaveLength(3);
+  });
+
+  it('falls back atomically, reports once, and composes accessible notices', () => {
+    const report = vi.fn();
+    setErrorHandler(report);
+    const rows = Array.from({ length: 1001 }, (_, index) => [String(index), '']);
+    const element = create();
+    element.setData(rows, {
+      presentation: {
+        merges: [{ startRow: 999, endRow: 1001, startColumn: 0, endColumn: 1 }],
+      },
+    });
+    document.body.append(element);
+
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report.mock.calls[0]?.[1]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'truncated_range' })])
+    );
+    expect(element.shadowRoot?.querySelectorAll('tbody td')).toHaveLength(2000);
+    expect(element.shadowRoot?.querySelectorAll('[role="status"]')).toHaveLength(2);
+    expect(
+      element.shadowRoot?.querySelector('.sheet-surface__scroll')?.getAttribute('aria-describedby')
+    ).toBe('sheet-truncation-notice sheet-presentation-notice');
+  });
+
+  it('snapshots presentation input and validates against resolved header precedence', () => {
+    const range = { startRow: 0, endRow: 1, startColumn: 0, endColumn: 2 };
+    const element = create();
+    element.setAttribute('header-row', '');
+    element.setData(
+      [
+        ['Header', ''],
+        ['Value', ''],
+      ],
+      { headerRow: false, presentation: { merges: [range] } }
+    );
+    range.endColumn = 1;
+    document.body.append(element);
+
+    expect(element.shadowRoot?.querySelector('thead')).toBeNull();
+    expect(element.shadowRoot?.querySelector('td')?.colSpan).toBe(2);
   });
 });

@@ -6,6 +6,7 @@ export default defineConfig({
     csv: 'src/csv/index.ts',
     grid: 'src/grid/index.ts',
     preview: 'src/preview/index.ts',
+    presentation: 'src/presentation/index.ts',
   },
   format: ['esm', 'cjs'],
   dts: true,
