@@ -37,7 +37,7 @@ import {
 } from '../shared/render';
 import { tableStyles } from '../shared/table.styles';
 
-export type SheetEditorMode = 'navigation' | 'quick-edit';
+export type SheetEditorMode = 'navigation' | 'quick-edit' | 'caret-edit';
 
 interface CellDraft {
   coordinate: SheetCoordinate;
@@ -97,6 +97,8 @@ export class SheetEditor extends HTMLElement {
     this.root.addEventListener('compositionstart', this.handleCompositionStart);
     this.root.addEventListener('compositionend', this.handleCompositionEnd);
     this.root.addEventListener('focusout', this.handleFocusOut);
+    this.root.addEventListener('scroll', this.handleOverlayGeometry, true);
+    this.root.addEventListener('dblclick', this.handleDoubleClick);
     this.root.addEventListener('pointerdown', this.handlePointerDown);
     this.root.addEventListener('pointermove', this.handlePointerMove);
     this.root.addEventListener('pointerup', this.handlePointerEnd);
@@ -105,7 +107,12 @@ export class SheetEditor extends HTMLElement {
   }
 
   connectedCallback(): void {
+    window.addEventListener('resize', this.handleOverlayGeometry);
     this.render();
+  }
+
+  disconnectedCallback(): void {
+    window.removeEventListener('resize', this.handleOverlayGeometry);
   }
 
   attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
@@ -288,6 +295,18 @@ export class SheetEditor extends HTMLElement {
       this.handleQuickEditKey(keyboardEvent);
       return;
     }
+    if (this.mode === 'caret-edit') {
+      this.handleCaretEditKey(keyboardEvent);
+      return;
+    }
+
+    if (keyboardEvent.key === 'F2') {
+      if (this.canEdit() && !this.isComposingEvent(keyboardEvent)) {
+        keyboardEvent.preventDefault();
+        this.startCaretEdit();
+      }
+      return;
+    }
 
     if (isUndoShortcut(keyboardEvent)) {
       if (!this.canEdit()) return;
@@ -331,6 +350,11 @@ export class SheetEditor extends HTMLElement {
 
   private handleQuickEditKey(event: KeyboardEvent): void {
     if (this.isComposingEvent(event)) return;
+    if (event.key === 'F2') {
+      event.preventDefault();
+      this.switchToCaretEdit();
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
       this.cancelDraft(true, true);
@@ -347,6 +371,28 @@ export class SheetEditor extends HTMLElement {
       event.preventDefault();
       this.commitDraft(direction, true);
     }
+  }
+
+  private handleCaretEditKey(event: KeyboardEvent): void {
+    if (this.isComposingEvent(event)) return;
+    if (event.key === 'F2') {
+      event.preventDefault();
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.cancelDraft(true, true);
+      return;
+    }
+    if (event.key !== 'Enter') return;
+
+    event.preventDefault();
+    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      this.insertDraftNewline();
+      return;
+    }
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    this.commitDraft(event.shiftKey ? 'up' : 'down', true);
   }
 
   private readonly handleBeforeInput = (event: Event): void => {
@@ -373,6 +419,7 @@ export class SheetEditor extends HTMLElement {
     this.draft.value = candidate;
     this.draft.selectionStart = textarea.selectionStart;
     this.draft.selectionEnd = textarea.selectionEnd;
+    this.resizeDraftControl(textarea);
     this.emitIfChanged(previousSource);
   };
 
@@ -385,11 +432,28 @@ export class SheetEditor extends HTMLElement {
   };
 
   private readonly handleFocusOut = (event: Event): void => {
-    if (this.mode !== 'quick-edit' || !this.draft) return;
+    if (this.mode === 'navigation' || !this.draft) return;
     const focusEvent = event as FocusEvent;
     const next = focusEvent.relatedTarget;
     if (next instanceof Node && this.root.contains(next)) return;
     this.commitDraft(null, false);
+  };
+
+  private readonly handleDoubleClick = (event: Event): void => {
+    if (!this.canEdit()) return;
+    const mouseEvent = event as MouseEvent;
+    if (mouseEvent.button !== 0 || mouseEvent.target instanceof HTMLTextAreaElement) return;
+    const target = mouseEvent.target;
+    const cell =
+      target instanceof Element ? target.closest<HTMLElement>('td[data-row][data-column]') : null;
+    if (!cell) return;
+    const coordinate = coordinateFromCell(cell);
+    if (!coordinate) return;
+    mouseEvent.preventDefault();
+    if (this.mode !== 'navigation') this.commitDraft(null, false);
+    this.selection = createSheetSelection(coordinate, coordinate, this.mergeIndex);
+    this.applySelection(false);
+    this.startCaretEdit();
   };
 
   private readonly handlePointerDown = (event: Event): void => {
@@ -403,7 +467,7 @@ export class SheetEditor extends HTMLElement {
     if (!coordinate) return;
     pointerEvent.preventDefault();
 
-    if (this.mode === 'quick-edit') this.commitDraft(null, false);
+    if (this.mode !== 'navigation') this.commitDraft(null, false);
 
     const liveCell = this.cellAt(coordinate);
     if (!liveCell) return;
@@ -443,11 +507,19 @@ export class SheetEditor extends HTMLElement {
   };
 
   private startQuickEdit(replacement?: string): void {
+    this.startDraft('quick-edit', replacement);
+  }
+
+  private startCaretEdit(): void {
+    this.startDraft('caret-edit');
+  }
+
+  private startDraft(mode: Exclude<SheetEditorMode, 'navigation'>, replacement?: string): void {
     if (!this.canEdit()) return;
     const previousSource = this.getContent();
     const coordinate = { ...this.selection.active };
     const value = this.committedRows[coordinate.row]?.[coordinate.column] ?? '';
-    this.mode = 'quick-edit';
+    this.mode = mode;
     this.draft = {
       coordinate,
       value,
@@ -469,6 +541,19 @@ export class SheetEditor extends HTMLElement {
     this.emitIfChanged(previousSource);
   }
 
+  private switchToCaretEdit(): void {
+    if (!this.draft || this.mode !== 'quick-edit') return;
+    const textarea = this.editControl();
+    if (textarea) {
+      this.draft.selectionStart = textarea.selectionStart;
+      this.draft.selectionEnd = textarea.selectionEnd;
+      textarea.classList.add('sheet-editor__input--caret');
+      textarea.dataset.mode = 'caret-edit';
+    }
+    this.mode = 'caret-edit';
+    if (textarea) this.resizeDraftControl(textarea);
+  }
+
   private mountDraftControl(): HTMLTextAreaElement | null {
     if (!this.draft) return null;
     const cell = this.cellAt(this.draft.coordinate);
@@ -478,6 +563,8 @@ export class SheetEditor extends HTMLElement {
 
     const textarea = document.createElement('textarea');
     textarea.className = 'sheet-editor__input';
+    if (this.mode === 'caret-edit') textarea.classList.add('sheet-editor__input--caret');
+    textarea.dataset.mode = this.mode;
     textarea.rows = 1;
     textarea.spellcheck = true;
     textarea.value = this.draft.value;
@@ -488,7 +575,32 @@ export class SheetEditor extends HTMLElement {
     cell.append(textarea);
     textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(this.draft.selectionStart, this.draft.selectionEnd);
+    this.resizeDraftControl(textarea);
     return textarea;
+  }
+
+  private insertDraftNewline(): void {
+    const draft = this.draft;
+    const textarea = this.editControl();
+    if (!draft || !textarea || this.mode !== 'caret-edit') return;
+    const previousSource = this.getContent();
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const candidate = `${textarea.value.slice(0, start)}\n${textarea.value.slice(end)}`;
+    const failure = this.validateDraftCandidate(candidate);
+    if (failure) {
+      this.showLimit(failure, textarea);
+      return;
+    }
+
+    this.clearLimit(textarea);
+    draft.value = candidate;
+    draft.selectionStart = start + 1;
+    draft.selectionEnd = start + 1;
+    textarea.value = candidate;
+    textarea.setSelectionRange(start + 1, start + 1);
+    this.resizeDraftControl(textarea);
+    this.emitIfChanged(previousSource);
   }
 
   private commitDraft(direction: SheetMoveDirection | null, focus: boolean): void {
@@ -616,6 +728,28 @@ export class SheetEditor extends HTMLElement {
     this.root.querySelector('#sheet-editor-limit-notice')?.remove();
     textarea.removeAttribute('aria-describedby');
   }
+
+  private resizeDraftControl(textarea: HTMLTextAreaElement): void {
+    if (this.mode !== 'caret-edit') {
+      textarea.style.removeProperty('height');
+      textarea.style.removeProperty('overflow-y');
+      return;
+    }
+    const cell = textarea.closest<HTMLTableCellElement>('td[data-row][data-column]');
+    const surface = this.root.querySelector<HTMLElement>('.sheet-surface');
+    const baseHeight = Math.max(cell?.getBoundingClientRect().height ?? 0, 20) + 2;
+    const surfaceHeight = surface?.getBoundingClientRect().height ?? 0;
+    const maxHeight = Math.max(baseHeight, Math.min(surfaceHeight || 160, 160));
+    textarea.style.height = 'auto';
+    const desired = Math.max(baseHeight, Math.min(textarea.scrollHeight + 4, maxHeight));
+    textarea.style.height = `${desired}px`;
+    textarea.style.overflowY = textarea.scrollHeight + 4 > desired ? 'auto' : 'hidden';
+  }
+
+  private readonly handleOverlayGeometry = (): void => {
+    const textarea = this.editControl();
+    if (textarea) this.resizeDraftControl(textarea);
+  };
 
   private cellFromEvent(event: PointerEvent, usePoint = false): HTMLElement | null {
     const target = event.target;

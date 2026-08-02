@@ -145,6 +145,14 @@
   white-space: pre-wrap;
 }
 
+.sheet-editor__input--caret {
+  z-index: 5;
+  min-height: calc(100% + 2px);
+  max-height: min(10rem, 50vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 .sheet-editor__limit {
   color: var(--spl-sheet-danger, var(--color-danger, #b42318));
 }
