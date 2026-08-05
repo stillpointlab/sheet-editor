@@ -1,13 +1,6 @@
 /// <reference lib="dom" />
 
-import {
-  DEFAULT_CSV_LIMITS,
-  parseCsv,
-  serializeCsv,
-  utf8ByteLength,
-  type CsvParseResult,
-  type CsvSourceStyle,
-} from '../csv';
+import { DEFAULT_CSV_LIMITS, utf8ByteLength } from '../csv';
 import {
   createSheetMergeIndex,
   createSheetSelection,
@@ -23,10 +16,8 @@ import { reportError } from '../log';
 import {
   validateSheetPresentation,
   type SheetContentOptions,
-  type SheetPresentation,
   type SheetPresentationIssue,
 } from '../presentation';
-import { snapshotSheetPresentation } from '../presentation/presentation';
 import { columnLabel } from '../shared/column-label';
 import {
   appendColumnGroups,
@@ -36,6 +27,8 @@ import {
   renderTable,
 } from '../shared/render';
 import { tableStyles } from '../shared/table.styles';
+
+import { createCsvSourceSession, type SheetEditorSourceSession } from './source-session';
 
 export type SheetEditorMode = 'navigation' | 'quick-edit' | 'caret-edit';
 
@@ -53,20 +46,10 @@ interface CellTransaction {
 }
 
 const HISTORY_LIMIT = 100;
-const DEFAULT_SOURCE_STYLE: CsvSourceStyle = {
-  bom: false,
-  lineEnding: '\r\n',
-  finalRecordTerminated: false,
-};
-
 export class SheetEditor extends HTMLElement {
   private readonly root: ShadowRoot;
-  private originalSource = '';
-  private model: CsvParseResult = parseCsv('');
-  private baselineRows: string[][] = [];
+  private sourceSession: SheetEditorSourceSession = createCsvSourceSession('');
   private committedRows: string[][] = [];
-  private sourceStyle: CsvSourceStyle = { ...DEFAULT_SOURCE_STYLE };
-  private presentation: SheetPresentation = {};
   private mergeIndex: SheetMergeIndex = createSheetMergeIndex([]);
   private presentationIssues: readonly SheetPresentationIssue[] = [];
   private presentationReported = false;
@@ -127,15 +110,13 @@ export class SheetEditor extends HTMLElement {
   }
 
   setContent(content: string, options: SheetContentOptions = {}): void {
-    this.originalSource = content;
-    this.model = parseCsv(content);
-    this.presentation = snapshotSheetPresentation(options.presentation);
+    this.sourceSession = createCsvSourceSession(content, options);
     this.prepareLoad();
     if (this.isConnected) this.render();
   }
 
   getContent(): string {
-    if (!this.isInteractive()) return this.originalSource;
+    if (!this.isInteractive()) return this.sourceSession.originalSource;
     return this.serializeRows(this.rowsWithDraft());
   }
 
@@ -170,21 +151,18 @@ export class SheetEditor extends HTMLElement {
     this.presentationReported = false;
     this.mergeIndex = createSheetMergeIndex([]);
     this.bounds = { rowCount: 1, columnCount: 1 };
-    this.baselineRows = [];
     this.committedRows = [];
-    this.sourceStyle = { ...DEFAULT_SOURCE_STYLE };
 
-    if (this.model.ok) {
-      this.baselineRows = cloneRows(this.model.rows);
-      this.committedRows = cloneRows(this.model.rows);
-      this.sourceStyle = { ...this.model.sourceStyle };
+    const model = this.sourceSession.model;
+    if (model.ok) {
+      this.committedRows = cloneRows(model.rows);
     }
 
-    if (this.model.ok && !this.model.truncated) {
-      const validation = validateSheetPresentation(this.presentation, {
-        rows: this.model.rows,
-        totalRows: this.model.totalRows,
-        maxColumns: this.model.maxColumns,
+    if (model.ok && !model.truncated) {
+      const validation = validateSheetPresentation(this.sourceSession.resolvedPresentation, {
+        rows: model.rows,
+        totalRows: model.totalRows,
+        maxColumns: model.maxColumns,
         headerRow: false,
       });
       if (validation.ok) {
@@ -203,14 +181,14 @@ export class SheetEditor extends HTMLElement {
   }
 
   private render(): void {
-    const model = this.model;
+    const model = this.sourceSession.model;
     if (!model.ok || model.truncated) {
       renderTable(this.root, model, {
         addressed: true,
         headerRow: false,
         label: 'Spreadsheet editor',
         emptyMessage: 'No sheet data.',
-        presentation: this.presentation,
+        presentation: this.sourceSession.resolvedPresentation,
       });
       const status = this.root.querySelector<HTMLElement>(
         '.sheet-surface__message, .sheet-surface__notice'
@@ -695,13 +673,7 @@ export class SheetEditor extends HTMLElement {
   }
 
   private serializeRows(rows: readonly (readonly string[])[]): string {
-    if (rowsEqual(rows, this.baselineRows)) return this.originalSource;
-    return serializeCsv(rows, {
-      bom: this.sourceStyle.bom,
-      lineEnding: this.sourceStyle.lineEnding,
-      terminateFinalRecord: this.sourceStyle.finalRecordTerminated,
-      escapeFormulas: false,
-    });
+    return this.sourceSession.serialize(rows);
   }
 
   private emitIfChanged(previousSource: string): void {
@@ -827,7 +799,7 @@ export class SheetEditor extends HTMLElement {
   }
 
   private isInteractive(): boolean {
-    return this.model.ok && !this.model.truncated;
+    return this.sourceSession.model.ok && !this.sourceSession.model.truncated;
   }
 
   private isReadOnly(): boolean {
@@ -835,7 +807,7 @@ export class SheetEditor extends HTMLElement {
   }
 
   private canEdit(): boolean {
-    return this.isInteractive() && !this.isReadOnly();
+    return this.isInteractive() && this.sourceSession.editable && !this.isReadOnly();
   }
 
   private isComposingEvent(event: KeyboardEvent): boolean {
