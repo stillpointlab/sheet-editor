@@ -28,7 +28,11 @@ import {
 } from '../shared/render';
 import { tableStyles } from '../shared/table.styles';
 
-import { createCsvSourceSession, type SheetEditorSourceSession } from './source-session';
+import {
+  createCsvSourceSession,
+  createDocumentSourceSession,
+  type SheetEditorSourceSession,
+} from './source-session';
 
 export type SheetEditorMode = 'navigation' | 'quick-edit' | 'caret-edit';
 
@@ -51,6 +55,7 @@ export class SheetEditor extends HTMLElement {
   private sourceSession: SheetEditorSourceSession = createCsvSourceSession('');
   private committedRows: string[][] = [];
   private mergeIndex: SheetMergeIndex = createSheetMergeIndex([]);
+  private sourceMergeIndex: SheetMergeIndex = createSheetMergeIndex([]);
   private presentationIssues: readonly SheetPresentationIssue[] = [];
   private presentationReported = false;
   private bounds: SheetCanvasBounds = { rowCount: 1, columnCount: 1 };
@@ -106,11 +111,17 @@ export class SheetEditor extends HTMLElement {
     }
     this.root
       .querySelector('[role="grid"]')
-      ?.setAttribute('aria-readonly', String(this.isReadOnly()));
+      ?.setAttribute('aria-readonly', String(this.isEditingDisabled()));
   }
 
   setContent(content: string, options: SheetContentOptions = {}): void {
     this.sourceSession = createCsvSourceSession(content, options);
+    this.prepareLoad();
+    if (this.isConnected) this.render();
+  }
+
+  setDocumentSource(source: string, options: SheetContentOptions = {}): void {
+    this.sourceSession = createDocumentSourceSession(source, options);
     this.prepareLoad();
     if (this.isConnected) this.render();
   }
@@ -147,9 +158,10 @@ export class SheetEditor extends HTMLElement {
     this.dragAnchor = null;
     this.undoHistory = [];
     this.redoHistory = [];
-    this.presentationIssues = [];
+    this.presentationIssues = [...this.sourceSession.presentationIssues];
     this.presentationReported = false;
     this.mergeIndex = createSheetMergeIndex([]);
+    this.sourceMergeIndex = createSheetMergeIndex([]);
     this.bounds = { rowCount: 1, columnCount: 1 };
     this.committedRows = [];
 
@@ -159,6 +171,16 @@ export class SheetEditor extends HTMLElement {
     }
 
     if (model.ok && !model.truncated) {
+      const sourceValidation = validateSheetPresentation(this.sourceSession.embeddedPresentation, {
+        rows: model.rows,
+        totalRows: model.totalRows,
+        maxColumns: model.maxColumns,
+        headerRow: false,
+      });
+      if (sourceValidation.ok) {
+        this.sourceMergeIndex = createSheetMergeIndex(sourceValidation.presentation.merges);
+      }
+
       const validation = validateSheetPresentation(this.sourceSession.resolvedPresentation, {
         rows: model.rows,
         totalRows: model.totalRows,
@@ -168,7 +190,7 @@ export class SheetEditor extends HTMLElement {
       if (validation.ok) {
         this.mergeIndex = createSheetMergeIndex(validation.presentation.merges);
       } else {
-        this.presentationIssues = validation.issues;
+        this.presentationIssues = [...this.presentationIssues, ...validation.issues];
       }
       this.bounds = canvasBounds(this.committedRows);
     }
@@ -217,7 +239,7 @@ export class SheetEditor extends HTMLElement {
     table.setAttribute('role', 'grid');
     table.setAttribute('aria-label', 'Spreadsheet editor');
     table.setAttribute('aria-multiselectable', 'true');
-    table.setAttribute('aria-readonly', String(this.isReadOnly()));
+    table.setAttribute('aria-readonly', String(this.isEditingDisabled()));
     appendColumnGroups(table, this.bounds.columnCount, true, false, this.mergeIndex.ranges);
     table.append(createAddressedHead(this.bounds.columnCount));
 
@@ -241,6 +263,9 @@ export class SheetEditor extends HTMLElement {
           range
         );
         cell.setAttribute('role', 'gridcell');
+        if (this.sourceMergeIndex.isCovered(rowIndex, columnIndex)) {
+          cell.setAttribute('aria-readonly', 'true');
+        }
         if (
           rowIndex >= this.committedRows.length ||
           columnIndex >= (this.committedRows[rowIndex]?.length ?? 0)
@@ -661,7 +686,10 @@ export class SheetEditor extends HTMLElement {
     if (widestRow(rows) > DEFAULT_CSV_LIMITS.maxColumns) {
       return `Sheet content exceeds the ${DEFAULT_CSV_LIMITS.maxColumns.toLocaleString('en-US')}-column limit.`;
     }
-    if (utf8ByteLength(this.serializeRows(rows)) > DEFAULT_CSV_LIMITS.maxInputBytes) {
+    if (
+      utf8ByteLength(this.sourceSession.serializeRowsForLimit(rows)) >
+      DEFAULT_CSV_LIMITS.maxInputBytes
+    ) {
       return `Sheet content exceeds the ${DEFAULT_CSV_LIMITS.maxInputBytes.toLocaleString('en-US')}-byte limit.`;
     }
     return null;
@@ -807,7 +835,15 @@ export class SheetEditor extends HTMLElement {
   }
 
   private canEdit(): boolean {
-    return this.isInteractive() && this.sourceSession.editable && !this.isReadOnly();
+    return (
+      this.isInteractive() &&
+      !this.isEditingDisabled() &&
+      !this.sourceMergeIndex.isCovered(this.selection.active.row, this.selection.active.column)
+    );
+  }
+
+  private isEditingDisabled(): boolean {
+    return !this.sourceSession.editable || this.isReadOnly();
   }
 
   private isComposingEvent(event: KeyboardEvent): boolean {

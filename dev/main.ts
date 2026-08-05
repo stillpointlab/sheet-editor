@@ -2,7 +2,6 @@ import '../src/grid';
 import '../src/editor';
 import '../src/preview';
 
-import { serializeCsv } from '../src/csv';
 import { parseSheetDocument } from '../src/document';
 
 import type { SheetEditor } from '../src/editor';
@@ -103,11 +102,8 @@ function render(): void {
     if (!parsed.ok) throw new Error(parsed.error.message);
     preview.setDocument(parsed.document, { presentation: selected.documentOverride });
     grid.setDocument(parsed.document, { presentation: selected.documentOverride });
-    editor.setContent(serializeCsv(parsed.document.data.rows), {
-      presentation:
-        selected.documentOverride === undefined
-          ? parsed.document.presentation
-          : selected.documentOverride,
+    editor.setDocumentSource(selected.documentSource, {
+      presentation: selected.documentOverride,
     });
     editorContent.textContent = editor.getContent();
     return;

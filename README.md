@@ -116,23 +116,32 @@ Quarter,Revenue,Cost
 Q1,1200,800
 ```
 
-Parse the document explicitly and pass its structured result to either element. Plain CSV remains
-plain CSV and is never sniffed for an envelope.
+Select document handling explicitly. Preview/grid callers parse once and pass the structured result;
+the editor accepts the original source so it can preserve an unchanged document byte-for-byte. Plain
+CSV remains plain CSV and is never sniffed for an envelope.
 
 ```ts
 import { parseSheetDocument } from '@stillpointlab/sheet-editor/document';
+import '@stillpointlab/sheet-editor/editor';
 import '@stillpointlab/sheet-editor/preview';
 
 const parsed = parseSheetDocument(source);
 if (parsed.ok) preview.setDocument(parsed.document);
+
+const editor = document.createElement('sheet-editor');
+editor.setDocumentSource(source);
 ```
 
 An optional call-site presentation inherits embedded merges when omitted, suppresses them with
 `null` or `{ merges: [] }`, and replaces the complete merge section when ranges are supplied.
 
-Plain CSV editing is enabled through `<sheet-editor>`. Editing the `.sheet` envelope itself,
-formulas, workbook formats, structural commands, and presentation commands remain outside this
-slice.
+`getContent()` returns the exact original `.sheet` source until a value changes, including after
+cancel or undo-to-baseline. A real value edit returns one canonical document while retaining its
+embedded merged ranges and original LF or CRLF family. Call-site presentation remains view-only and
+is never serialized.
+
+Editing the `.sheet` envelope itself, formulas, workbook formats, structural commands, and
+presentation commands remain outside this slice.
 
 ## Theming
 
