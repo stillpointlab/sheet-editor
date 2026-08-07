@@ -7,7 +7,6 @@ import {
 } from '../csv';
 import { parseSheetDocument, serializeSheetDocument } from '../document';
 import {
-  resolveSheetPresentation,
   snapshotSheetPresentation,
   validateSheetPresentation,
   type SheetContentOptions,
@@ -15,16 +14,22 @@ import {
   type SheetPresentationIssue,
 } from '../presentation/presentation';
 
+export type SheetPresentationOverride = SheetPresentation | null | undefined;
+
 export interface SheetEditorSourceSession {
   readonly originalSource: string;
   readonly model: CsvParseResult;
   readonly baselineRows: readonly (readonly string[])[];
   readonly embeddedPresentation: SheetPresentation;
-  readonly resolvedPresentation: SheetPresentation;
+  readonly presentationOverride: SheetPresentationOverride;
   readonly presentationIssues: readonly SheetPresentationIssue[];
   readonly editable: boolean;
-  serialize(rows: readonly (readonly string[])[]): string;
+  serialize(rows: readonly (readonly string[])[], embeddedPresentation: SheetPresentation): string;
   serializeRowsForLimit(rows: readonly (readonly string[])[]): string;
+  validateCandidate(
+    rows: readonly (readonly string[])[],
+    embeddedPresentation: SheetPresentation
+  ): boolean;
 }
 
 const DEFAULT_SOURCE_STYLE: CsvSourceStyle = {
@@ -40,7 +45,7 @@ export function createCsvSourceSession(
   const model = parseCsv(source);
   const baselineRows = model.ok ? snapshotRows(model.rows) : [];
   const sourceStyle = model.ok ? { ...model.sourceStyle } : { ...DEFAULT_SOURCE_STYLE };
-  const resolvedPresentation = snapshotSheetPresentation(options.presentation);
+  const presentationOverride = snapshotPresentationOverride(options.presentation);
   const serializeRows = (rows: readonly (readonly string[])[]): string =>
     serializeCsv(rows, {
       bom: sourceStyle.bom,
@@ -54,7 +59,7 @@ export function createCsvSourceSession(
     model,
     baselineRows,
     embeddedPresentation: {},
-    resolvedPresentation,
+    presentationOverride,
     presentationIssues: [],
     editable: model.ok && !model.truncated,
     serialize(rows): string {
@@ -62,6 +67,10 @@ export function createCsvSourceSession(
       return serializeRows(rows);
     },
     serializeRowsForLimit: serializeRows,
+    validateCandidate(rows): boolean {
+      const reparsed = parseCsv(serializeRows(rows), DEFAULT_CSV_LIMITS);
+      return reparsed.ok && !reparsed.truncated && rowsEqual(reparsed.rows, rows);
+    },
   };
 }
 
@@ -69,6 +78,7 @@ export function createDocumentSourceSession(
   source: string,
   options: SheetContentOptions = {}
 ): SheetEditorSourceSession {
+  const presentationOverride = snapshotPresentationOverride(options.presentation);
   const parsed = parseSheetDocument(source, { csvLimits: DEFAULT_CSV_LIMITS });
   if (!parsed.ok) {
     return {
@@ -79,11 +89,12 @@ export function createDocumentSourceSession(
       },
       baselineRows: [],
       embeddedPresentation: {},
-      resolvedPresentation: {},
+      presentationOverride,
       presentationIssues: [],
       editable: false,
       serialize: () => source,
       serializeRowsForLimit: () => '',
+      validateCandidate: () => false,
     };
   }
 
@@ -97,9 +108,6 @@ export function createDocumentSourceSession(
     headerRow: false,
   });
   const editable = !model.truncated && validation.ok;
-  const resolvedPresentation = validation.ok
-    ? resolveSheetPresentation(embeddedPresentation, options.presentation)
-    : {};
   const lineEnding = source.startsWith('---\r\n') ? '\r\n' : '\n';
   const serializeRows = (rows: readonly (readonly string[])[]): string =>
     serializeCsv(rows, { lineEnding, bom: false, escapeFormulas: false });
@@ -109,18 +117,48 @@ export function createDocumentSourceSession(
     model,
     baselineRows,
     embeddedPresentation,
-    resolvedPresentation,
+    presentationOverride,
     presentationIssues: validation.ok ? [] : validation.issues,
     editable,
-    serialize(rows): string {
-      if (rowsEqual(rows, baselineRows) || !editable) return source;
+    serialize(rows, currentPresentation): string {
+      if (
+        (rowsEqual(rows, baselineRows) &&
+          presentationsEqual(currentPresentation, embeddedPresentation)) ||
+        !editable
+      ) {
+        return source;
+      }
       return serializeSheetDocument(
-        { format: 'csv', rows, presentation: embeddedPresentation },
+        { format: 'csv', rows, presentation: currentPresentation },
         { lineEnding }
       );
     },
     serializeRowsForLimit: serializeRows,
+    validateCandidate(rows, currentPresentation): boolean {
+      try {
+        const candidate = serializeSheetDocument(
+          { format: 'csv', rows, presentation: currentPresentation },
+          { lineEnding }
+        );
+        const reparsed = parseSheetDocument(candidate, { csvLimits: DEFAULT_CSV_LIMITS });
+        return (
+          reparsed.ok &&
+          !reparsed.document.data.truncated &&
+          rowsEqual(reparsed.document.data.rows, rows) &&
+          presentationsEqual(reparsed.document.presentation, currentPresentation)
+        );
+      } catch {
+        return false;
+      }
+    },
   };
+}
+
+export function snapshotPresentationOverride(
+  presentation: SheetPresentationOverride
+): SheetPresentationOverride {
+  if (presentation === null || presentation === undefined) return presentation;
+  return snapshotSheetPresentation(presentation);
 }
 
 function snapshotRows(rows: readonly (readonly string[])[]): string[][] {
@@ -146,5 +184,31 @@ function rowsEqual(
     (row, rowIndex) =>
       row.length === right[rowIndex].length &&
       row.every((value, columnIndex) => value === right[rowIndex][columnIndex])
+  );
+}
+
+function presentationsEqual(left: SheetPresentation, right: SheetPresentation): boolean {
+  const leftMerges = sortedMerges(left);
+  const rightMerges = sortedMerges(right);
+  if (leftMerges.length !== rightMerges.length) return false;
+  return leftMerges.every((range, index) => {
+    const other = rightMerges[index];
+    return (
+      other !== undefined &&
+      range.startRow === other.startRow &&
+      range.endRow === other.endRow &&
+      range.startColumn === other.startColumn &&
+      range.endColumn === other.endColumn
+    );
+  });
+}
+
+function sortedMerges(presentation: SheetPresentation) {
+  return [...(presentation.merges ?? [])].sort(
+    (left, right) =>
+      left.startRow - right.startRow ||
+      left.startColumn - right.startColumn ||
+      left.endRow - right.endRow ||
+      left.endColumn - right.endColumn
   );
 }

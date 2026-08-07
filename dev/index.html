@@ -74,12 +74,15 @@
         Fixture
         <select id="fixture">
           <option value="empty">Empty virtual A1</option>
+          <option value="ragged">Ragged rows</option>
           <option value="bom-lf">BOM + LF + final newline</option>
           <option value="regular">Quoted and ragged</option>
           <option value="wide">Columns beyond Z</option>
           <option value="truncated">1,001 rows</option>
           <option value="malformed">Malformed CSV</option>
           <option value="oversized">Over 256 KiB</option>
+          <option value="row-cap">1,000-row insertion cap</option>
+          <option value="column-cap">256-column insertion cap</option>
           <option value="horizontal">Horizontal merge</option>
           <option value="vertical">Vertical merge</option>
           <option value="rectangle">Rectangle merge</option>
@@ -91,6 +94,7 @@
           <option value="document-invalid">.sheet invalid contextual merge</option>
         </select>
       </label>
+      <label><input id="readonly" type="checkbox" /> Read-only editor</label>
       <button id="width" type="button">Toggle narrow pane</button>
       <button id="theme" type="button">Toggle dark theme</button>
     </div>
@@ -100,8 +104,10 @@
         <h2>Interactive sheet selection</h2>
         <div class="pane"><sheet-editor id="editor"></sheet-editor></div>
         <p>
-          Enter quick-edits; F2/double-click caret-edits; Alt/Option+Enter inserts a line break.
-          Escape cancels, Enter/Shift+Enter commit and move, and Ctrl/Cmd+Z undoes in navigation.
+          Use the toolbar for row/column changes; Left/Right and Home/End move within it, and Escape
+          returns to the grid. Enter quick-edits; F2/double-click caret-edits; Alt/Option+Enter
+          inserts a line break. Escape cancels, Enter/Shift+Enter commit and move, and Ctrl/Cmd+Z
+          undoes in navigation.
         </p>
         <pre><code id="editor-content"></code></pre>
       </section>

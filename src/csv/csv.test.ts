@@ -175,6 +175,29 @@ describe('serializeCsv', () => {
     expect(serializeCsv([[]], { terminateFinalRecord: true })).toBe('\r\n');
   });
 
+  it('round-trips explicit trailing blank records without requiring final termination', () => {
+    expect(serializeCsv([['']])).toBe('""');
+    expect(serializeCsv([['a'], ['']], { lineEnding: '\n' })).toBe('a\n""');
+    expect(serializeCsv([['a'], [''], ['']], { lineEnding: '\n' })).toBe('a\n\n""');
+    expect(serializeCsv([[]])).toBe('""');
+
+    for (const rows of [[['']], [['a'], ['']], [['a'], [''], ['']]]) {
+      expect(parseCsv(serializeCsv(rows))).toMatchObject({ ok: true, rows });
+    }
+  });
+
+  it('round-trips trailing blank records when the final record is terminated', () => {
+    for (const rows of [[['']], [['a'], ['']], [['a'], [''], ['']]]) {
+      const serialized = serializeCsv(rows, { lineEnding: '\n', terminateFinalRecord: true });
+      expect(serialized.endsWith('\n')).toBe(true);
+      expect(parseCsv(serialized)).toMatchObject({
+        ok: true,
+        rows,
+        sourceStyle: { finalRecordTerminated: true },
+      });
+    }
+  });
+
   it('escapes formula-trigger values only when requested', () => {
     const dangerous = [['=SUM(A1)', '+1', '-1', '@cmd', '\tcommand', '\rcommand', '  =later']];
 

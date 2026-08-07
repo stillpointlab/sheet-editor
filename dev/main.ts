@@ -25,6 +25,7 @@ interface Fixture {
 
 const fixtures: Record<string, Fixture> = {
   empty: { source: '' },
+  ragged: { source: 'A\nB,C,D\nE,F' },
   'bom-lf': { source: '\uFEFFName,Value\nCoffee,12\n' },
   regular: { source: regular },
   wide: { source: Array.from({ length: 30 }, (_, index) => `Column ${index + 1}`).join(',') },
@@ -33,6 +34,8 @@ const fixtures: Record<string, Fixture> = {
   },
   malformed: { source: '"Unclosed quoted field' },
   oversized: { source: 'x'.repeat(256 * 1024 + 1) },
+  'row-cap': { source: Array.from({ length: 1000 }, (_, index) => `Row ${index + 1}`).join('\n') },
+  'column-cap': { source: Array.from({ length: 256 }, (_, index) => `C${index + 1}`).join(',') },
   horizontal: {
     source: 'Header A,Header B,Header C\nWide value,,Tail\nOne,Two,Three',
     presentation: {
@@ -93,6 +96,7 @@ const grid = document.querySelector('#grid') as SheetGrid;
 const editor = document.querySelector('#editor') as SheetEditor;
 const editorContent = document.querySelector('#editor-content') as HTMLElement;
 const fixture = document.querySelector('#fixture') as HTMLSelectElement;
+const readonlyToggle = document.querySelector('#readonly') as HTMLInputElement;
 const panes = [...document.querySelectorAll('.pane')];
 
 function render(): void {
@@ -119,6 +123,9 @@ editor.addEventListener('content-change', () => {
 });
 
 fixture.addEventListener('change', render);
+readonlyToggle.addEventListener('change', () => {
+  editor.setAttribute('readonly', String(readonlyToggle.checked));
+});
 document.querySelector('#width')?.addEventListener('click', () => {
   for (const pane of panes) pane.classList.toggle('narrow');
 });

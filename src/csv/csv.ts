@@ -279,14 +279,19 @@ export function serializeCsv(
   }
 
   const content = rows
-    .map((row) =>
-      row
+    .map((row, rowIndex) => {
+      const serialized = row
         .map((rawCell) => {
           const cell = options.escapeFormulas ? escapeFormula(String(rawCell)) : String(rawCell);
           return quoteCell(cell);
         })
-        .join(',')
-    )
+        .join(',');
+      const isFinalAmbiguousBlank =
+        rowIndex === rows.length - 1 &&
+        !options.terminateFinalRecord &&
+        (row.length === 0 || (row.length === 1 && String(row[0]) === ''));
+      return isFinalAmbiguousBlank ? '""' : serialized;
+    })
     .join(lineEnding);
 
   const terminated =
