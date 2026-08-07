@@ -86,7 +86,7 @@ The editor provides a fast-entry keyboard profile:
 | Enter               | Edit the active value             |
 | Printable character | Replace the active value and edit |
 | Arrow / Shift+Arrow | Move / extend selection           |
-| Ctrl/Cmd+Z          | Undo a committed cell transaction |
+| Ctrl/Cmd+Z          | Undo a committed edit transaction |
 
 Quick edit assigns Escape to cancel, Enter/Shift+Enter to commit and move down/up, and an unmodified
 arrow to commit and move in that direction. F2 or double-click switches to caret edit, where arrows,
@@ -99,6 +99,27 @@ Tab commits through ordinary focus traversal rather than trapping focus inside t
 `getContent()` and `content-change` include the open draft so hosts can autosave safely. No-op,
 cancel, and undo-to-baseline restore the original CSV byte-for-byte. A real edit preserves BOM,
 dominant record ending, and final-record termination while safely canonicalizing CSV quoting.
+
+## Structural toolbar
+
+The editor toolbar inserts one row above or below the current selection, inserts one column before
+or after it, and deletes the active row or column. Insertions use the outside edge of a rectangular
+selection; deletion uses its active endpoint. A command collapses selection onto the inserted line
+or nearest surviving cell and returns focus to the grid.
+
+The trailing virtual row and column are not stored dimensions. Inserting from either side of a
+virtual edge appends one materialized line, while deleting a virtual line is disabled. Column
+commands are global spreadsheet operations, so they pad ragged rows to the widest stored row before
+inserting or deleting a field. Deleting the only stored row or column produces the empty matrix.
+
+Tab reaches the toolbar through one roving tab stop. Left/Right and Home/End move among enabled
+buttons, and Escape returns to the active grid cell. Read-only editors retain the visible toolbar
+with disabled controls; malformed and truncated sources omit it.
+
+Each successful command emits one complete `content-change` and is one Ctrl/Cmd+Z transaction.
+Clicking a command during cell editing first commits that cell, leaving the commit and structural
+action as two undo steps. Structural changes preserve CSV source style and update embedded `.sheet`
+merge coordinates atomically.
 
 ## `.sheet` documents
 
@@ -140,7 +161,7 @@ cancel or undo-to-baseline. A real value edit returns one canonical document whi
 embedded merged ranges and original LF or CRLF family. Call-site presentation remains view-only and
 is never serialized.
 
-Editing the `.sheet` envelope itself, formulas, workbook formats, structural commands, and
+Editing the `.sheet` envelope itself, formulas, workbook formats, and direct Merge/Unmerge or other
 presentation commands remain outside this slice.
 
 ## Theming

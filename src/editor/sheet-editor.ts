@@ -16,8 +16,10 @@ import { reportError } from '../log';
 import {
   validateSheetPresentation,
   type SheetContentOptions,
+  type SheetPresentation,
   type SheetPresentationIssue,
 } from '../presentation';
+import { resolveSheetPresentation, snapshotSheetPresentation } from '../presentation/presentation';
 import { columnLabel } from '../shared/column-label';
 import {
   appendColumnGroups,
@@ -31,8 +33,15 @@ import { tableStyles } from '../shared/table.styles';
 import {
   createCsvSourceSession,
   createDocumentSourceSession,
+  snapshotPresentationOverride,
   type SheetEditorSourceSession,
+  type SheetPresentationOverride,
 } from './source-session';
+import {
+  applySheetStructure,
+  transformSheetPresentation,
+  type SheetStructureOperation,
+} from './structure';
 
 export type SheetEditorMode = 'navigation' | 'quick-edit' | 'caret-edit';
 
@@ -43,17 +52,70 @@ interface CellDraft {
   selectionEnd: number;
 }
 
-interface CellTransaction {
-  coordinate: SheetCoordinate;
-  beforeRows: string[][];
-  afterRows: string[][];
+interface EditorSnapshot {
+  rows: string[][];
+  embeddedPresentation: SheetPresentation;
+  presentationOverride: SheetPresentationOverride;
+  selection: SheetSelection;
+}
+
+interface EditorTransaction {
+  before: EditorSnapshot;
+  after: EditorSnapshot;
+}
+
+type SheetStructureCommand =
+  | 'insert-row-above'
+  | 'insert-row-below'
+  | 'insert-column-before'
+  | 'insert-column-after'
+  | 'delete-row'
+  | 'delete-column';
+
+interface ToolbarCommandDefinition {
+  command: SheetStructureCommand;
+  label: string;
+  icon: string;
+  group: 'insert' | 'delete';
 }
 
 const HISTORY_LIMIT = 100;
+const TOOLBAR_COMMANDS: readonly ToolbarCommandDefinition[] = [
+  {
+    command: 'insert-row-above',
+    label: 'Insert row above',
+    icon: 'row-above',
+    group: 'insert',
+  },
+  {
+    command: 'insert-row-below',
+    label: 'Insert row below',
+    icon: 'row-below',
+    group: 'insert',
+  },
+  {
+    command: 'insert-column-before',
+    label: 'Insert column before',
+    icon: 'column-before',
+    group: 'insert',
+  },
+  {
+    command: 'insert-column-after',
+    label: 'Insert column after',
+    icon: 'column-after',
+    group: 'insert',
+  },
+  { command: 'delete-row', label: 'Delete row', icon: 'delete-row', group: 'delete' },
+  { command: 'delete-column', label: 'Delete column', icon: 'delete-column', group: 'delete' },
+];
+
 export class SheetEditor extends HTMLElement {
   private readonly root: ShadowRoot;
   private sourceSession: SheetEditorSourceSession = createCsvSourceSession('');
   private committedRows: string[][] = [];
+  private embeddedPresentation: SheetPresentation = {};
+  private presentationOverride: SheetPresentationOverride = undefined;
+  private resolvedPresentation: SheetPresentation = {};
   private mergeIndex: SheetMergeIndex = createSheetMergeIndex([]);
   private sourceMergeIndex: SheetMergeIndex = createSheetMergeIndex([]);
   private presentationIssues: readonly SheetPresentationIssue[] = [];
@@ -66,8 +128,9 @@ export class SheetEditor extends HTMLElement {
   );
   private mode: SheetEditorMode = 'navigation';
   private draft: CellDraft | null = null;
-  private undoHistory: CellTransaction[] = [];
-  private redoHistory: CellTransaction[] = [];
+  private undoHistory: EditorTransaction[] = [];
+  private redoHistory: EditorTransaction[] = [];
+  private toolbarTabCommand: SheetStructureCommand = TOOLBAR_COMMANDS[0].command;
   private composing = false;
   private dragPointerId: number | null = null;
   private dragAnchor: SheetCoordinate | null = null;
@@ -91,6 +154,7 @@ export class SheetEditor extends HTMLElement {
     this.root.addEventListener('pointermove', this.handlePointerMove);
     this.root.addEventListener('pointerup', this.handlePointerEnd);
     this.root.addEventListener('pointercancel', this.handlePointerEnd);
+    this.root.addEventListener('click', this.handleToolbarClick);
     this.prepareLoad();
   }
 
@@ -112,6 +176,7 @@ export class SheetEditor extends HTMLElement {
     this.root
       .querySelector('[role="grid"]')
       ?.setAttribute('aria-readonly', String(this.isEditingDisabled()));
+    this.syncToolbarState();
   }
 
   setContent(content: string, options: SheetContentOptions = {}): void {
@@ -162,6 +227,14 @@ export class SheetEditor extends HTMLElement {
     this.presentationReported = false;
     this.mergeIndex = createSheetMergeIndex([]);
     this.sourceMergeIndex = createSheetMergeIndex([]);
+    this.embeddedPresentation = snapshotSheetPresentation(this.sourceSession.embeddedPresentation);
+    this.presentationOverride = snapshotPresentationOverride(
+      this.sourceSession.presentationOverride
+    );
+    this.resolvedPresentation = resolveSheetPresentation(
+      this.embeddedPresentation,
+      this.presentationOverride
+    );
     this.bounds = { rowCount: 1, columnCount: 1 };
     this.committedRows = [];
 
@@ -171,27 +244,7 @@ export class SheetEditor extends HTMLElement {
     }
 
     if (model.ok && !model.truncated) {
-      const sourceValidation = validateSheetPresentation(this.sourceSession.embeddedPresentation, {
-        rows: model.rows,
-        totalRows: model.totalRows,
-        maxColumns: model.maxColumns,
-        headerRow: false,
-      });
-      if (sourceValidation.ok) {
-        this.sourceMergeIndex = createSheetMergeIndex(sourceValidation.presentation.merges);
-      }
-
-      const validation = validateSheetPresentation(this.sourceSession.resolvedPresentation, {
-        rows: model.rows,
-        totalRows: model.totalRows,
-        maxColumns: model.maxColumns,
-        headerRow: false,
-      });
-      if (validation.ok) {
-        this.mergeIndex = createSheetMergeIndex(validation.presentation.merges);
-      } else {
-        this.presentationIssues = [...this.presentationIssues, ...validation.issues];
-      }
+      this.rebuildPresentationState();
       this.bounds = canvasBounds(this.committedRows);
     }
 
@@ -202,6 +255,35 @@ export class SheetEditor extends HTMLElement {
     );
   }
 
+  private rebuildPresentationState(): boolean {
+    this.presentationIssues = [];
+    this.mergeIndex = createSheetMergeIndex([]);
+    this.sourceMergeIndex = createSheetMergeIndex([]);
+    const context = presentationContext(this.committedRows);
+    const sourceValidation = validateSheetPresentation(this.embeddedPresentation, context);
+    if (!sourceValidation.ok) {
+      this.presentationIssues = [...sourceValidation.issues];
+      this.resolvedPresentation = {};
+      return false;
+    }
+    this.embeddedPresentation = sourceValidation.presentation;
+    this.sourceMergeIndex = createSheetMergeIndex(sourceValidation.presentation.merges);
+
+    this.resolvedPresentation = resolveSheetPresentation(
+      this.embeddedPresentation,
+      this.presentationOverride
+    );
+    const validation = validateSheetPresentation(this.resolvedPresentation, context);
+    if (!validation.ok) {
+      this.presentationIssues = [...validation.issues];
+      this.resolvedPresentation = {};
+      return true;
+    }
+    this.resolvedPresentation = validation.presentation;
+    this.mergeIndex = createSheetMergeIndex(validation.presentation.merges);
+    return true;
+  }
+
   private render(): void {
     const model = this.sourceSession.model;
     if (!model.ok || model.truncated) {
@@ -210,7 +292,7 @@ export class SheetEditor extends HTMLElement {
         headerRow: false,
         label: 'Spreadsheet editor',
         emptyMessage: 'No sheet data.',
-        presentation: this.sourceSession.resolvedPresentation,
+        presentation: this.resolvedPresentation,
       });
       const status = this.root.querySelector<HTMLElement>(
         '.sheet-surface__message, .sheet-surface__notice'
@@ -230,7 +312,8 @@ export class SheetEditor extends HTMLElement {
     style.textContent = tableStyles;
 
     const surface = document.createElement('div');
-    surface.className = 'sheet-surface sheet-surface--addressed sheet-surface--interactive';
+    surface.className =
+      'sheet-surface sheet-surface--addressed sheet-surface--interactive sheet-surface--editor';
     const scroll = document.createElement('div');
     scroll.className = 'sheet-surface__scroll';
 
@@ -278,7 +361,7 @@ export class SheetEditor extends HTMLElement {
     }
     table.append(body);
     scroll.append(table);
-    surface.append(scroll);
+    surface.append(this.createToolbar(), scroll);
 
     if (this.presentationIssues.length > 0) {
       const notice = createInvalidPresentationNotice();
@@ -291,9 +374,315 @@ export class SheetEditor extends HTMLElement {
     if (this.draft) this.mountDraftControl();
   }
 
+  private createToolbar(): HTMLElement {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'sheet-editor__toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Sheet structure');
+
+    const enabledCommands = TOOLBAR_COMMANDS.filter(({ command }) =>
+      this.isStructureCommandEnabled(command)
+    );
+    if (!enabledCommands.some(({ command }) => command === this.toolbarTabCommand)) {
+      this.toolbarTabCommand = enabledCommands[0]?.command ?? TOOLBAR_COMMANDS[0].command;
+    }
+
+    for (const groupName of ['insert', 'delete'] as const) {
+      if (groupName === 'delete') {
+        const separator = document.createElement('span');
+        separator.className = 'sheet-editor__toolbar-separator';
+        separator.setAttribute('aria-hidden', 'true');
+        toolbar.append(separator);
+      }
+      const group = document.createElement('div');
+      group.className = 'sheet-editor__toolbar-group';
+      group.setAttribute('role', 'group');
+      group.setAttribute(
+        'aria-label',
+        groupName === 'insert' ? 'Insert rows and columns' : 'Delete rows and columns'
+      );
+      for (const definition of TOOLBAR_COMMANDS.filter(({ group }) => group === groupName)) {
+        const button = document.createElement('button');
+        const enabled = this.isStructureCommandEnabled(definition.command);
+        button.type = 'button';
+        button.className = `sheet-editor__toolbar-button sheet-editor__toolbar-button--${definition.group}`;
+        button.dataset.sheetCommand = definition.command;
+        button.setAttribute('aria-label', definition.label);
+        button.title = definition.label;
+        button.disabled = !enabled;
+        button.tabIndex = enabled && definition.command === this.toolbarTabCommand ? 0 : -1;
+        button.innerHTML = structureIcon(definition.icon);
+        group.append(button);
+      }
+      toolbar.append(group);
+    }
+    return toolbar;
+  }
+
+  private syncToolbarState(): void {
+    const buttons = [...this.root.querySelectorAll<HTMLButtonElement>('[data-sheet-command]')];
+    if (buttons.length === 0) return;
+    const enabledButtons = buttons.filter((button) => {
+      const command = structureCommandFromButton(button);
+      const enabled = command !== null && this.isStructureCommandEnabled(command);
+      button.disabled = !enabled;
+      return enabled;
+    });
+    if (!enabledButtons.some((button) => button.dataset.sheetCommand === this.toolbarTabCommand)) {
+      const command = enabledButtons[0] ? structureCommandFromButton(enabledButtons[0]) : null;
+      if (command) this.toolbarTabCommand = command;
+    }
+    for (const button of buttons) {
+      button.tabIndex =
+        !button.disabled && button.dataset.sheetCommand === this.toolbarTabCommand ? 0 : -1;
+    }
+  }
+
+  private readonly handleToolbarClick = (event: Event): void => {
+    const target = event.target;
+    const button =
+      target instanceof Element
+        ? target.closest<HTMLButtonElement>('button[data-sheet-command]')
+        : null;
+    const command = button ? structureCommandFromButton(button) : null;
+    if (!button || !command || button.disabled) return;
+    event.preventDefault();
+    if (this.composing) {
+      this.editControl()?.focus({ preventScroll: true });
+      return;
+    }
+    this.toolbarTabCommand = command;
+    this.runStructureCommand(command);
+  };
+
+  private handleToolbarKeyDown(event: KeyboardEvent, button: HTMLButtonElement): void {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.focusActiveCell({ preventScroll: true });
+      return;
+    }
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+
+    const buttons = [
+      ...this.root.querySelectorAll<HTMLButtonElement>(
+        '.sheet-editor__toolbar-button:not(:disabled)'
+      ),
+    ];
+    if (buttons.length === 0) return;
+    event.preventDefault();
+    const currentIndex = Math.max(0, buttons.indexOf(button));
+    let nextIndex: number;
+    if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = buttons.length - 1;
+    else if (event.key === 'ArrowLeft') {
+      nextIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+    } else {
+      nextIndex = (currentIndex + 1) % buttons.length;
+    }
+    const next = buttons[nextIndex];
+    if (!next) return;
+    const command = structureCommandFromButton(next);
+    if (!command) return;
+    this.toolbarTabCommand = command;
+    this.syncToolbarState();
+    next.focus();
+  }
+
+  private runStructureCommand(command: SheetStructureCommand): void {
+    if (!this.isStructureCommandEnabled(command)) {
+      this.focusActiveCell({ preventScroll: true });
+      return;
+    }
+    if (this.draft) this.commitDraft(null, false);
+    if (!this.isStructureCommandEnabled(command)) {
+      this.focusActiveCell({ preventScroll: true });
+      return;
+    }
+
+    const previousSource = this.getContent();
+    const before = this.createSnapshot();
+    const operation = this.structureOperation(command);
+    const currentResolved = resolveSheetPresentation(
+      this.embeddedPresentation,
+      this.presentationOverride
+    );
+    const currentViewValid = validateSheetPresentation(
+      currentResolved,
+      presentationContext(this.committedRows)
+    ).ok;
+    const rows = applySheetStructure(this.committedRows, operation);
+    const embeddedPresentation = transformSheetPresentation(this.embeddedPresentation, operation);
+    const presentationOverride = currentViewValid
+      ? transformPresentationOverride(this.presentationOverride, operation)
+      : snapshotPresentationOverride(this.presentationOverride);
+    const failure = this.validateStructureCandidate(
+      rows,
+      embeddedPresentation,
+      presentationOverride,
+      currentViewValid
+    );
+    if (failure) {
+      this.showStructureError(failure);
+      this.focusActiveCell({ preventScroll: true });
+      return;
+    }
+
+    this.committedRows = rows;
+    this.embeddedPresentation = embeddedPresentation;
+    this.presentationOverride = presentationOverride;
+    this.rebuildPresentationState();
+    this.bounds = canvasBounds(this.committedRows);
+    this.selection = this.selectionAfterStructure(operation, before.selection.active);
+    const after = this.createSnapshot();
+    this.pushHistory({ before, after });
+    if (this.isConnected) this.render();
+    this.focusActiveCell({ preventScroll: true });
+    this.emitIfChanged(previousSource);
+  }
+
+  private structureOperation(command: SheetStructureCommand): SheetStructureOperation {
+    const materializedRows = this.committedRows.length;
+    const materializedColumns = widestRow(this.committedRows);
+    switch (command) {
+      case 'insert-row-above':
+        return {
+          axis: 'row',
+          kind: 'insert',
+          index: Math.min(this.selection.range.startRow, materializedRows),
+        };
+      case 'insert-row-below':
+        return {
+          axis: 'row',
+          kind: 'insert',
+          index: Math.min(this.selection.range.endRow, materializedRows),
+        };
+      case 'insert-column-before':
+        return {
+          axis: 'column',
+          kind: 'insert',
+          index: Math.min(this.selection.range.startColumn, materializedColumns),
+        };
+      case 'insert-column-after':
+        return {
+          axis: 'column',
+          kind: 'insert',
+          index: Math.min(this.selection.range.endColumn, materializedColumns),
+        };
+      case 'delete-row':
+        return { axis: 'row', kind: 'delete', index: this.selection.active.row };
+      case 'delete-column':
+        return { axis: 'column', kind: 'delete', index: this.selection.active.column };
+    }
+  }
+
+  private selectionAfterStructure(
+    operation: SheetStructureOperation,
+    previousActive: SheetCoordinate
+  ): SheetSelection {
+    const rowMaximum = Math.max(0, this.committedRows.length - 1);
+    const columnMaximum = Math.max(0, widestRow(this.committedRows) - 1);
+    const coordinate =
+      operation.axis === 'row'
+        ? {
+            row:
+              operation.kind === 'insert' ? operation.index : Math.min(operation.index, rowMaximum),
+            column: Math.min(previousActive.column, columnMaximum),
+          }
+        : {
+            row: Math.min(previousActive.row, rowMaximum),
+            column:
+              operation.kind === 'insert'
+                ? operation.index
+                : Math.min(operation.index, columnMaximum),
+          };
+    return createSheetSelection(coordinate, coordinate, this.mergeIndex);
+  }
+
+  private validateStructureCandidate(
+    rows: readonly (readonly string[])[],
+    embeddedPresentation: SheetPresentation,
+    presentationOverride: SheetPresentationOverride,
+    requireValidView: boolean
+  ): string | null {
+    if (rows.length > DEFAULT_CSV_LIMITS.maxMaterializedRows) {
+      return `Sheet content exceeds the ${DEFAULT_CSV_LIMITS.maxMaterializedRows.toLocaleString('en-US')}-row limit.`;
+    }
+    if (widestRow(rows) > DEFAULT_CSV_LIMITS.maxColumns) {
+      return `Sheet content exceeds the ${DEFAULT_CSV_LIMITS.maxColumns.toLocaleString('en-US')}-column limit.`;
+    }
+    if (
+      rows.some((row) =>
+        row.some((value) => utf8ByteLength(value) > DEFAULT_CSV_LIMITS.maxCellBytes)
+      )
+    ) {
+      return `Cell content exceeds the ${DEFAULT_CSV_LIMITS.maxCellBytes.toLocaleString('en-US')}-byte limit.`;
+    }
+    if (
+      utf8ByteLength(this.sourceSession.serializeRowsForLimit(rows)) >
+      DEFAULT_CSV_LIMITS.maxInputBytes
+    ) {
+      return `Sheet content exceeds the ${DEFAULT_CSV_LIMITS.maxInputBytes.toLocaleString('en-US')}-byte limit.`;
+    }
+    const context = presentationContext(rows);
+    if (!validateSheetPresentation(embeddedPresentation, context).ok) {
+      return 'The structural change would make merged-cell presentation invalid.';
+    }
+    if (
+      requireValidView &&
+      !validateSheetPresentation(
+        resolveSheetPresentation(embeddedPresentation, presentationOverride),
+        context
+      ).ok
+    ) {
+      return 'The structural change would make merged-cell presentation invalid.';
+    }
+    if (!this.sourceSession.validateCandidate(rows, embeddedPresentation)) {
+      return 'The structural change could not be serialized safely.';
+    }
+    return null;
+  }
+
+  private isStructureCommandEnabled(command: SheetStructureCommand): boolean {
+    if (!this.canMutate() || this.composing) return false;
+    switch (command) {
+      case 'insert-row-above':
+      case 'insert-row-below':
+        return this.committedRows.length < DEFAULT_CSV_LIMITS.maxMaterializedRows;
+      case 'insert-column-before':
+      case 'insert-column-after':
+        return widestRow(this.committedRows) < DEFAULT_CSV_LIMITS.maxColumns;
+      case 'delete-row':
+        return this.selection.active.row < this.committedRows.length;
+      case 'delete-column':
+        return this.selection.active.column < widestRow(this.committedRows);
+    }
+  }
+
+  private showStructureError(message: string): void {
+    let notice = this.root.querySelector<HTMLParagraphElement>('#sheet-editor-structure-notice');
+    if (!notice) {
+      notice = document.createElement('p');
+      notice.id = 'sheet-editor-structure-notice';
+      notice.className = 'sheet-surface__notice sheet-editor__limit';
+      notice.setAttribute('role', 'status');
+      notice.setAttribute('aria-live', 'polite');
+      this.root.querySelector('.sheet-surface')?.append(notice);
+    }
+    notice.textContent = message;
+  }
+
   private readonly handleKeyDown = (event: Event): void => {
     if (!this.isInteractive()) return;
     const keyboardEvent = event as KeyboardEvent;
+    const target = keyboardEvent.target;
+    const toolbarButton =
+      target instanceof Element
+        ? target.closest<HTMLButtonElement>('button[data-sheet-command]')
+        : null;
+    if (toolbarButton) {
+      this.handleToolbarKeyDown(keyboardEvent, toolbarButton);
+      return;
+    }
     if (this.mode === 'quick-edit') {
       this.handleQuickEditKey(keyboardEvent);
       return;
@@ -312,7 +701,7 @@ export class SheetEditor extends HTMLElement {
     }
 
     if (isUndoShortcut(keyboardEvent)) {
-      if (!this.canEdit()) return;
+      if (!this.canMutate()) return;
       keyboardEvent.preventDefault();
       if (keyboardEvent.key.toLowerCase() === 'y' || keyboardEvent.shiftKey) this.redo();
       else this.undo();
@@ -428,10 +817,12 @@ export class SheetEditor extends HTMLElement {
 
   private readonly handleCompositionStart = (): void => {
     this.composing = true;
+    this.syncToolbarState();
   };
 
   private readonly handleCompositionEnd = (): void => {
     this.composing = false;
+    this.syncToolbarState();
   };
 
   private readonly handleFocusOut = (event: Event): void => {
@@ -609,18 +1000,12 @@ export class SheetEditor extends HTMLElement {
   private commitDraft(direction: SheetMoveDirection | null, focus: boolean): void {
     const draft = this.draft;
     if (!draft) return;
+    const before = this.createSnapshot();
     const beforeRows = cloneRows(this.committedRows);
     const afterRows = applyCellValue(beforeRows, draft.coordinate, draft.value);
     const changed = !rowsEqual(beforeRows, afterRows);
     if (changed) {
       this.committedRows = afterRows;
-      this.undoHistory.push({
-        coordinate: { ...draft.coordinate },
-        beforeRows,
-        afterRows: cloneRows(afterRows),
-      });
-      if (this.undoHistory.length > HISTORY_LIMIT) this.undoHistory.shift();
-      this.redoHistory = [];
     }
 
     this.mode = 'navigation';
@@ -631,6 +1016,7 @@ export class SheetEditor extends HTMLElement {
     if (direction) {
       this.selection = moveSheetSelection(this.selection, direction, this.bounds, this.mergeIndex);
     }
+    if (changed) this.pushHistory({ before, after: this.createSnapshot() });
     if (this.isConnected) this.render();
     if (focus) this.focusActiveCell({ preventScroll: true });
   }
@@ -653,8 +1039,7 @@ export class SheetEditor extends HTMLElement {
     if (!transaction) return;
     const previousSource = this.getContent();
     this.redoHistory.push(transaction);
-    this.committedRows = cloneRows(transaction.beforeRows);
-    this.finishHistoryChange(transaction.coordinate, previousSource);
+    this.finishHistoryChange(transaction.before, previousSource);
   }
 
   private redo(): void {
@@ -662,16 +1047,42 @@ export class SheetEditor extends HTMLElement {
     if (!transaction) return;
     const previousSource = this.getContent();
     this.undoHistory.push(transaction);
-    this.committedRows = cloneRows(transaction.afterRows);
-    this.finishHistoryChange(transaction.coordinate, previousSource);
+    this.finishHistoryChange(transaction.after, previousSource);
   }
 
-  private finishHistoryChange(coordinate: SheetCoordinate, previousSource: string): void {
-    this.bounds = canvasBounds(this.committedRows);
-    this.selection = createSheetSelection(coordinate, coordinate, this.mergeIndex);
+  private finishHistoryChange(snapshot: EditorSnapshot, previousSource: string): void {
+    this.applySnapshot(snapshot);
     if (this.isConnected) this.render();
     this.focusActiveCell({ preventScroll: true });
     this.emitIfChanged(previousSource);
+  }
+
+  private createSnapshot(): EditorSnapshot {
+    return {
+      rows: cloneRows(this.committedRows),
+      embeddedPresentation: snapshotSheetPresentation(this.embeddedPresentation),
+      presentationOverride: snapshotPresentationOverride(this.presentationOverride),
+      selection: snapshotSelection(this.selection),
+    };
+  }
+
+  private applySnapshot(snapshot: EditorSnapshot): void {
+    this.committedRows = cloneRows(snapshot.rows);
+    this.embeddedPresentation = snapshotSheetPresentation(snapshot.embeddedPresentation);
+    this.presentationOverride = snapshotPresentationOverride(snapshot.presentationOverride);
+    this.rebuildPresentationState();
+    this.bounds = canvasBounds(this.committedRows);
+    this.selection = createSheetSelection(
+      snapshot.selection.anchor,
+      snapshot.selection.active,
+      this.mergeIndex
+    );
+  }
+
+  private pushHistory(transaction: EditorTransaction): void {
+    this.undoHistory.push(transaction);
+    if (this.undoHistory.length > HISTORY_LIMIT) this.undoHistory.shift();
+    this.redoHistory = [];
   }
 
   private validateDraftCandidate(value: string): string | null {
@@ -701,7 +1112,7 @@ export class SheetEditor extends HTMLElement {
   }
 
   private serializeRows(rows: readonly (readonly string[])[]): string {
-    return this.sourceSession.serialize(rows);
+    return this.sourceSession.serialize(rows, this.embeddedPresentation);
   }
 
   private emitIfChanged(previousSource: string): void {
@@ -775,6 +1186,7 @@ export class SheetEditor extends HTMLElement {
       cell.tabIndex = active ? 0 : -1;
       cell.classList.toggle('sheet-table__cell--active', active);
     }
+    this.syncToolbarState();
     if (focus) this.focusActiveCell({ preventScroll: true });
   }
 
@@ -836,10 +1248,13 @@ export class SheetEditor extends HTMLElement {
 
   private canEdit(): boolean {
     return (
-      this.isInteractive() &&
-      !this.isEditingDisabled() &&
+      this.canMutate() &&
       !this.sourceMergeIndex.isCovered(this.selection.active.row, this.selection.active.column)
     );
+  }
+
+  private canMutate(): boolean {
+    return this.isInteractive() && !this.isEditingDisabled();
   }
 
   private isEditingDisabled(): boolean {
@@ -906,6 +1321,55 @@ function rowsEqual(
       row.length === right[rowIndex]?.length &&
       row.every((value, columnIndex) => value === right[rowIndex]?.[columnIndex])
   );
+}
+
+function presentationContext(rows: readonly (readonly string[])[]) {
+  return {
+    rows,
+    totalRows: rows.length,
+    maxColumns: widestRow(rows),
+    headerRow: false,
+  };
+}
+
+function snapshotSelection(selection: SheetSelection): SheetSelection {
+  return {
+    anchor: { ...selection.anchor },
+    active: { ...selection.active },
+    range: { ...selection.range },
+  };
+}
+
+function transformPresentationOverride(
+  override: SheetPresentationOverride,
+  operation: SheetStructureOperation
+): SheetPresentationOverride {
+  const snapshot = snapshotPresentationOverride(override);
+  if (snapshot === null || snapshot === undefined) return snapshot;
+  if (!Object.hasOwn(snapshot, 'merges') || snapshot.merges === undefined) return snapshot;
+  return transformSheetPresentation(snapshot, operation);
+}
+
+function structureCommandFromButton(button: HTMLButtonElement): SheetStructureCommand | null {
+  const command = button.dataset.sheetCommand;
+  return TOOLBAR_COMMANDS.some((definition) => definition.command === command)
+    ? (command as SheetStructureCommand)
+    : null;
+}
+
+const STRUCTURE_ICONS: Readonly<Record<string, string>> = {
+  'row-above': '<path d="M4 13h16v7H4zM11 3h2v3h3v2h-3v3h-2V8H8V6h3z" fill="currentColor"/>',
+  'row-below': '<path d="M4 4h16v7H4zM11 13h2v3h3v2h-3v3h-2v-3H8v-2h3z" fill="currentColor"/>',
+  'column-before': '<path d="M13 4h7v16h-7zM3 11h3V8h2v3h3v2H8v3H6v-3H3z" fill="currentColor"/>',
+  'column-after': '<path d="M4 4h7v16H4zM13 11h3V8h2v3h3v2h-3v3h-2v-3h-3z" fill="currentColor"/>',
+  'delete-row':
+    '<path d="M3 8h18v8H3zM8.7 10.3 12 13.6l3.3-3.3 1.4 1.4-3.3 3.3 3.3 3.3-1.4 1.4-3.3-3.3-3.3 3.3-1.4-1.4 3.3-3.3-3.3-3.3z" fill="currentColor"/>',
+  'delete-column':
+    '<path d="M8 3h8v18H8zM10.3 8.7l3.3 3.3-3.3 3.3 1.4 1.4 3.3-3.3 3.3 3.3 1.4-1.4-3.3-3.3 3.3-3.3-1.4-1.4-3.3 3.3-3.3-3.3z" fill="currentColor"/>',
+};
+
+function structureIcon(name: string): string {
+  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">${STRUCTURE_ICONS[name] ?? ''}</svg>`;
 }
 
 function coordinateFromCell(cell: HTMLElement): SheetCoordinate | null {

@@ -23,4 +23,13 @@ describe('shared table styles', () => {
     expect(tableStyles).toContain('scroll-padding-inline-start');
     expect(tableStyles).toContain('--spl-sheet-row-gutter-width');
   });
+
+  it('keeps the editor toolbar above the independently scrolling grid', () => {
+    expect(tableStyles).toContain('.sheet-surface--editor');
+    expect(tableStyles).toContain('grid-template-rows:auto minmax(0, 1fr) auto');
+    expect(tableStyles).toContain('.sheet-editor__toolbar');
+    expect(tableStyles).toContain('overflow-x:auto');
+    expect(tableStyles).toContain('.sheet-editor__toolbar-button--delete');
+    expect(tableStyles).toContain('--spl-sheet-danger');
+  });
 });

@@ -28,6 +28,91 @@
   background: inherit;
 }
 
+.sheet-surface--editor {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.sheet-editor__toolbar {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--spl-sheet-border, var(--spl-border-light, #d0d7de));
+  background: var(--spl-sheet-header-background, var(--spl-header-bg, #f6f8fa));
+  scrollbar-width: thin;
+}
+
+.sheet-editor__toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.sheet-editor__toolbar-separator {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--spl-sheet-border, var(--spl-border-light, #d0d7de));
+}
+
+.sheet-editor__toolbar-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--spl-sheet-text, var(--spl-text-primary, #1f2933));
+  background: transparent;
+  cursor: pointer;
+}
+
+.sheet-editor__toolbar-button svg {
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
+.sheet-editor__toolbar-button:hover:not(:disabled) {
+  border-color: var(--spl-sheet-border, var(--spl-border-light, #d0d7de));
+  background: var(--spl-sheet-background, var(--spl-background-primary, #ffffff));
+}
+
+.sheet-editor__toolbar-button:active:not(:disabled) {
+  background: var(
+    --spl-sheet-selection,
+    color-mix(in srgb, var(--spl-primary-blue, #0969da) 18%, transparent)
+  );
+}
+
+.sheet-editor__toolbar-button:focus-visible {
+  outline: 2px solid var(--spl-sheet-focus, var(--spl-focus-ring, #0969da));
+  outline-offset: 1px;
+}
+
+.sheet-editor__toolbar-button--delete:hover:not(:disabled),
+.sheet-editor__toolbar-button--delete:focus-visible {
+  color: var(--spl-sheet-danger, var(--spl-error-color, #b42318));
+}
+
+.sheet-editor__toolbar-button:disabled {
+  color: var(--spl-sheet-muted, var(--spl-text-muted, #8c959f));
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .sheet-surface__scroll {
   min-width: 0;
   min-height: 0;
@@ -230,6 +315,7 @@
   }
 
   .sheet-table th,
+  .sheet-editor__toolbar,
   .sheet-surface__notice {
     background: var(--spl-sheet-header-background, var(--spl-header-bg, #161b22));
   }
