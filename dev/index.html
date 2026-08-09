@@ -77,6 +77,7 @@
           <option value="ragged">Ragged rows</option>
           <option value="bom-lf">BOM + LF + final newline</option>
           <option value="regular">Quoted and ragged</option>
+          <option value="clipboard-literals">Clipboard literal values</option>
           <option value="wide">Columns beyond Z</option>
           <option value="truncated">1,001 rows</option>
           <option value="malformed">Malformed CSV</option>
@@ -113,7 +114,14 @@
           Document fixtures add emphasis and two alignment flyouts to the row/column tools.
           Left/Right and Home/End move within the toolbar; Escape returns to the grid. Enter
           quick-edits; F2/double-click caret-edits; Alt/Option+Enter inserts a line break. Escape
-          cancels, Enter/Shift+Enter commit and move, and Ctrl/Cmd+Z undoes in navigation.
+          cancels, Enter/Shift+Enter commit and move, and Ctrl/Cmd+Z undoes in navigation. Grid
+          Ctrl/Cmd+C and Ctrl/Cmd+V copy and paste literal TSV; Delete or Backspace clears values.
+        </p>
+        <p>
+          Clipboard smoke test: use Clipboard literal values and Document merged alignment to copy
+          rectangular selections between CSV, `.sheet`, and an external spreadsheet. Check quoted
+          multiline cells, merge/style retention, undo, read-only copy, and both themes in Firefox,
+          Chromium, and Safari. The source block below should always show the complete current file.
         </p>
         <pre><code id="editor-content"></code></pre>
       </section>

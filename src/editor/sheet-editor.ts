@@ -37,6 +37,13 @@ import { createSheetStyleIndex, type SheetStyleIndex } from '../shared/style-ind
 import { tableStyles } from '../shared/table.styles';
 
 import {
+  applyTabularPaste,
+  clearTabularRange,
+  extractTabularSelection,
+  parseTabularClipboard,
+  serializeTabularClipboard,
+} from './clipboard';
+import {
   createCsvSourceSession,
   createDocumentSourceSession,
   snapshotPresentationOverride,
@@ -164,6 +171,8 @@ export class SheetEditor extends HTMLElement {
     super();
     this.root = this.attachShadow({ mode: 'open' });
     this.root.addEventListener('keydown', this.handleKeyDown);
+    this.root.addEventListener('copy', this.handleCopy);
+    this.root.addEventListener('paste', this.handlePaste);
     this.root.addEventListener('beforeinput', this.handleBeforeInput);
     this.root.addEventListener('input', this.handleInput);
     this.root.addEventListener('compositionstart', this.handleCompositionStart);
@@ -1055,6 +1064,44 @@ export class SheetEditor extends HTMLElement {
     presentationOverride: SheetPresentationOverride,
     requireValidView: boolean
   ): string | null {
+    return this.validateRowsCandidate(
+      rows,
+      embeddedPresentation,
+      presentationOverride,
+      requireValidView,
+      'The structural change would make sheet presentation invalid.',
+      'The structural change could not be serialized safely.'
+    );
+  }
+
+  private validateValueCandidate(
+    rows: readonly (readonly string[])[],
+    action: 'paste' | 'clear'
+  ): string | null {
+    const currentContext = presentationContext(this.committedRows);
+    const currentViewValid = validateSheetPresentation(
+      resolveSheetPresentation(this.embeddedPresentation, this.presentationOverride),
+      currentContext
+    ).ok;
+    const description = action === 'paste' ? 'The pasted values' : 'The selected values';
+    return this.validateRowsCandidate(
+      rows,
+      this.embeddedPresentation,
+      this.presentationOverride,
+      currentViewValid,
+      `${description} would make sheet presentation invalid.`,
+      `${description} could not be serialized safely.`
+    );
+  }
+
+  private validateRowsCandidate(
+    rows: readonly (readonly string[])[],
+    embeddedPresentation: SheetPresentation,
+    presentationOverride: SheetPresentationOverride,
+    requireValidView: boolean,
+    presentationFailure: string,
+    serializationFailure: string
+  ): string | null {
     if (rows.length > DEFAULT_CSV_LIMITS.maxMaterializedRows) {
       return `Sheet content exceeds the ${DEFAULT_CSV_LIMITS.maxMaterializedRows.toLocaleString('en-US')}-row limit.`;
     }
@@ -1076,7 +1123,7 @@ export class SheetEditor extends HTMLElement {
     }
     const context = presentationContext(rows);
     if (!validateSheetPresentation(embeddedPresentation, context).ok) {
-      return 'The structural change would make sheet presentation invalid.';
+      return presentationFailure;
     }
     if (
       requireValidView &&
@@ -1085,10 +1132,10 @@ export class SheetEditor extends HTMLElement {
         context
       ).ok
     ) {
-      return 'The structural change would make sheet presentation invalid.';
+      return presentationFailure;
     }
     if (!this.sourceSession.validateCandidate(rows, embeddedPresentation)) {
-      return 'The structural change could not be serialized safely.';
+      return serializationFailure;
     }
     return null;
   }
@@ -1120,6 +1167,121 @@ export class SheetEditor extends HTMLElement {
       this.root.querySelector('.sheet-surface')?.append(notice);
     }
     notice.textContent = message;
+  }
+
+  private readonly handleCopy = (event: Event): void => {
+    if (this.mode !== 'navigation' || !this.isInteractive() || !this.gridOwnsEvent(event)) {
+      return;
+    }
+    const clipboardEvent = event as ClipboardEvent;
+    const clipboardData = clipboardEvent.clipboardData;
+    if (!clipboardData || typeof clipboardData.setData !== 'function') return;
+    const matrix = extractTabularSelection(
+      this.committedRows,
+      this.selection.range,
+      (row, column) => this.mergeIndex.isCovered(row, column)
+    );
+    const text = serializeTabularClipboard(matrix);
+    try {
+      clipboardData.setData('text/plain', text);
+    } catch {
+      return;
+    }
+    try {
+      clipboardData.setData('text/tab-separated-values', text);
+    } catch {
+      // text/plain is the required interoperable flavor.
+    }
+    clipboardEvent.preventDefault();
+  };
+
+  private readonly handlePaste = (event: Event): void => {
+    if (
+      this.mode !== 'navigation' ||
+      this.composing ||
+      !this.canMutate() ||
+      !this.gridOwnsEvent(event)
+    ) {
+      return;
+    }
+    const clipboardEvent = event as ClipboardEvent;
+    const payload = readClipboardText(clipboardEvent.clipboardData);
+    if (payload === null) return;
+    clipboardEvent.preventDefault();
+
+    const parsed = parseTabularClipboard(payload);
+    if (!parsed.ok) {
+      this.showStructureError(parsed.error.message);
+      return;
+    }
+    const start = {
+      row: this.selection.range.startRow,
+      column: this.selection.range.startColumn,
+    };
+    if (start.row + parsed.rowCount > DEFAULT_CSV_LIMITS.maxMaterializedRows) {
+      this.showStructureError(
+        `Pasted values would exceed the ${DEFAULT_CSV_LIMITS.maxMaterializedRows.toLocaleString('en-US')}-row limit.`
+      );
+      return;
+    }
+    if (start.column + parsed.columnCount > DEFAULT_CSV_LIMITS.maxColumns) {
+      this.showStructureError(
+        `Pasted values would exceed the ${DEFAULT_CSV_LIMITS.maxColumns.toLocaleString('en-US')}-column limit.`
+      );
+      return;
+    }
+
+    const rows = applyTabularPaste(this.committedRows, start, parsed.rows);
+    const failure = this.validateValueCandidate(rows, 'paste');
+    if (failure) {
+      this.showStructureError(failure);
+      return;
+    }
+    this.commitRowsTransaction(rows);
+  };
+
+  private clearSelectedValues(): void {
+    const rows = clearTabularRange(this.committedRows, this.selection.range);
+    const failure = this.validateValueCandidate(rows, 'clear');
+    if (failure) {
+      this.showStructureError(failure);
+      return;
+    }
+    this.commitRowsTransaction(rows);
+  }
+
+  private commitRowsTransaction(rows: readonly (readonly string[])[]): void {
+    if (rowsEqual(rows, this.committedRows)) return;
+    const previousSource = this.getContent();
+    const before = this.createSnapshot();
+    const scrollPosition = this.captureScrollPosition();
+    const restoreGridFocus = this.gridHasFocus();
+    this.committedRows = cloneRows(rows);
+    this.rebuildPresentationState();
+    this.bounds = canvasBounds(this.committedRows);
+    this.selection = createSheetSelection(
+      before.selection.anchor,
+      before.selection.active,
+      this.mergeIndex
+    );
+    this.pushHistory({ before, after: this.createSnapshot() });
+    if (this.isConnected) this.render();
+    this.restoreScrollPosition(scrollPosition);
+    if (restoreGridFocus) {
+      this.focusActiveCell({ preventScroll: true });
+      this.restoreScrollPosition(scrollPosition);
+    }
+    this.emitIfChanged(previousSource);
+  }
+
+  private gridOwnsEvent(event: Event): boolean {
+    const target = event.target;
+    return target instanceof Element && target.closest('[role="grid"]') !== null;
+  }
+
+  private gridHasFocus(): boolean {
+    const active = this.root.activeElement;
+    return active instanceof Element && active.closest('[role="grid"]') !== null;
   }
 
   private readonly handleKeyDown = (event: Event): void => {
@@ -1171,6 +1333,21 @@ export class SheetEditor extends HTMLElement {
       keyboardEvent.preventDefault();
       if (keyboardEvent.key.toLowerCase() === 'y' || keyboardEvent.shiftKey) this.redo();
       else this.undo();
+      return;
+    }
+
+    if (keyboardEvent.key === 'Delete' || keyboardEvent.key === 'Backspace') {
+      if (
+        !this.canMutate() ||
+        this.isComposingEvent(keyboardEvent) ||
+        keyboardEvent.shiftKey ||
+        hasCommandModifier(keyboardEvent) ||
+        !this.gridOwnsEvent(keyboardEvent)
+      ) {
+        return;
+      }
+      keyboardEvent.preventDefault();
+      this.clearSelectedValues();
       return;
     }
 
@@ -1965,6 +2142,21 @@ function directionForKey(key: string): SheetMoveDirection | null {
       return 'right';
     default:
       return null;
+  }
+}
+
+function readClipboardText(clipboardData: DataTransfer | null): string | null {
+  if (!clipboardData || typeof clipboardData.getData !== 'function') return null;
+  const types = Array.from(clipboardData.types ?? []);
+  const preferredTypes = ['text/tab-separated-values', 'text/plain'];
+  const type = preferredTypes
+    .map((preferred) => types.find((candidate) => candidate.toLowerCase() === preferred))
+    .find((candidate): candidate is string => candidate !== undefined);
+  if (!type) return null;
+  try {
+    return clipboardData.getData(type);
+  } catch {
+    return null;
   }
 }
 

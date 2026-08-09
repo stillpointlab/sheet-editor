@@ -11,7 +11,8 @@ editor surfaces.
 - `@stillpointlab/sheet-editor/presentation` — side-effect-free merge and cell-style validation
 - `@stillpointlab/sheet-editor/document` — side-effect-free strict `.sheet` parsing and serialization
 - `@stillpointlab/sheet-editor/interaction` — side-effect-free selection and merged-cell geometry
-- `@stillpointlab/sheet-editor/editor` — registers `<sheet-editor>`, an interactive CSV selection grid
+- `@stillpointlab/sheet-editor/editor` — registers `<sheet-editor>`, an interactive CSV and `.sheet`
+  grid
 - `@stillpointlab/sheet-editor` — registers and exports the grid, preview, and editor elements
 
 ## Usage
@@ -95,12 +96,15 @@ materializes those cells.
 
 The editor provides a fast-entry keyboard profile:
 
-| Key in navigation   | Result                            |
-| ------------------- | --------------------------------- |
-| Enter               | Edit the active value             |
-| Printable character | Replace the active value and edit |
-| Arrow / Shift+Arrow | Move / extend selection           |
-| Ctrl/Cmd+Z          | Undo a committed edit transaction |
+| Key in navigation   | Result                                     |
+| ------------------- | ------------------------------------------ |
+| Enter               | Edit the active value                      |
+| Printable character | Replace the active value and edit          |
+| Arrow / Shift+Arrow | Move / extend selection                    |
+| Ctrl/Cmd+C          | Copy the logical selection as literal TSV  |
+| Ctrl/Cmd+V          | Paste a TSV rectangle at the top-left cell |
+| Delete / Backspace  | Clear the selected cell values             |
+| Ctrl/Cmd+Z / Ctrl+Y | Undo / redo a committed transaction        |
 
 Quick edit assigns Escape to cancel, Enter/Shift+Enter to commit and move down/up, and an unmodified
 arrow to commit and move in that direction. F2 or double-click switches to caret edit, where arrows,
@@ -109,6 +113,20 @@ Alt/Option+Enter inserts one LF line break without leaving the cell. Plain Enter
 moves down. Ctrl/Command+Enter remains unassigned for a future range-fill command.
 
 Tab commits through ordinary focus traversal rather than trapping focus inside the grid.
+
+Grid copy and paste use synchronous browser clipboard events, so keyboard shortcuts, browser menu
+commands, and spreadsheet applications share the same plain-text path. Copy emits the complete
+merge-expanded rectangle with covered and virtual coordinates blank. Paste accepts bounded,
+quoted tab/newline-delimited values at the selection's top-left; it does not tile a scalar across a
+larger selection or carry formats, alignments, or merges. Literal tabs, multiline values, quotes,
+leading zeroes, HTML-looking text, and formula-looking text round-trip without evaluation or
+coercion.
+
+Delete and Backspace clear only materialized values and retain ragged row lengths, explicit trailing
+fields, and document presentation. Paste and clear are each one undoable transaction and one
+complete-source event when they change content. A valid read-only grid still permits cell copy, but
+paste and clear are unavailable. While either edit textarea is open, native text clipboard,
+Delete/Backspace, selection, and undo behavior remain untouched.
 
 `getContent()` and `content-change` include the open draft so hosts can autosave safely. No-op,
 cancel, and undo-to-baseline restore the original CSV byte-for-byte. A real edit preserves BOM,

@@ -38,6 +38,12 @@ const fixtures: Record<string, Fixture> = {
   ragged: { source: 'A\nB,C,D\nE,F' },
   'bom-lf': { source: '\uFEFFName,Value\nCoffee,12\n' },
   regular: { source: regular },
+  'clipboard-literals': {
+    source: [
+      'Label,Tab,Multiline,Quote,Formula,HTML',
+      'Source,"contains\ta tab","line one\nline two","say ""hello""",=SUM(A1),<b>literal</b>',
+    ].join('\n'),
+  },
   wide: { source: Array.from({ length: 30 }, (_, index) => `Column ${index + 1}`).join(',') },
   truncated: {
     source: Array.from({ length: 1001 }, (_, index) => `${index},Item ${index}`).join('\n'),
