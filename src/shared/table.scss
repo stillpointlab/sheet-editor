@@ -261,39 +261,39 @@
   white-space: nowrap;
 }
 
-.sheet-table__cell--bold {
+.sheet-table .sheet-table__cell--bold {
   font-weight: 700;
 }
 
-.sheet-table__cell--italic {
+.sheet-table .sheet-table__cell--italic {
   font-style: italic;
 }
 
-.sheet-table__cell--strikethrough {
+.sheet-table .sheet-table__cell--strikethrough {
   text-decoration-line: line-through;
 }
 
-.sheet-table__cell--align-left {
+.sheet-table .sheet-table__cell--align-left {
   text-align: left;
 }
 
-.sheet-table__cell--align-center {
+.sheet-table .sheet-table__cell--align-center {
   text-align: center;
 }
 
-.sheet-table__cell--align-right {
+.sheet-table .sheet-table__cell--align-right {
   text-align: right;
 }
 
-.sheet-table__cell--align-top {
+.sheet-table .sheet-table__cell--align-top {
   vertical-align: top;
 }
 
-.sheet-table__cell--align-middle {
+.sheet-table .sheet-table__cell--align-middle {
   vertical-align: middle;
 }
 
-.sheet-table__cell--align-bottom {
+.sheet-table .sheet-table__cell--align-bottom {
   vertical-align: bottom;
 }
 
