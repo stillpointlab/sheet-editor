@@ -7,12 +7,23 @@ import {
   type CsvLimits,
   type CsvParseResult,
 } from '../csv';
-import { formatA1Range, parseA1Range } from '../presentation/a1-range';
 import {
+  formatA1CellRange,
+  formatA1Range,
+  parseA1CellRange,
+  parseA1Range,
+} from '../presentation/a1-range';
+import {
+  MAX_SHEET_ALIGNMENT_RULES,
+  MAX_SHEET_FORMAT_RULES,
   MAX_SHEET_MERGES,
   validateSheetPresentation,
+  type SheetAlignmentRule,
   type SheetCellRange,
+  type SheetFormatRule,
+  type SheetHorizontalAlignment,
   type SheetPresentation,
+  type SheetVerticalAlignment,
 } from '../presentation/presentation';
 
 type CsvParseSuccess = Extract<CsvParseResult, { ok: true }>;
@@ -21,13 +32,19 @@ export interface ParsedSheetDocument {
   sheet: 'stillpoint/v1';
   format: 'csv';
   data: CsvParseSuccess;
-  presentation: { merges: SheetCellRange[] };
+  presentation: {
+    merges: SheetCellRange[];
+    formats?: SheetFormatRule[];
+    alignments?: SheetAlignmentRule[];
+  };
 }
 
 export type SheetDocumentErrorCode =
   | 'invalid_envelope'
   | 'frontmatter_too_large'
   | 'too_many_merges'
+  | 'too_many_formats'
+  | 'too_many_alignments'
   | 'invalid_frontmatter'
   | 'unsupported_version'
   | 'unsupported_format'
@@ -46,6 +63,8 @@ export type SheetDocumentParseResult =
 export interface ParseSheetDocumentOptions {
   maxFrontmatterBytes?: number;
   maxMerges?: number;
+  maxFormats?: number;
+  maxAlignments?: number;
   csvLimits?: Partial<CsvLimits>;
 }
 
@@ -62,8 +81,12 @@ export interface SerializeSheetDocumentOptions {
 const SHEET_VERSION = 'stillpoint/v1';
 const DEFAULT_MAX_FRONTMATTER_BYTES = 64 * 1024;
 const ROOT_KEYS = new Set(['sheet', 'format', 'presentation']);
-const PRESENTATION_KEYS = new Set(['merges']);
+const PRESENTATION_KEYS = new Set(['merges', 'formats', 'alignments']);
 const MERGE_KEYS = new Set(['range']);
+const FORMAT_KEYS = new Set(['range', 'bold', 'italic', 'strikethrough']);
+const ALIGNMENT_KEYS = new Set(['range', 'horizontal', 'vertical']);
+const HORIZONTAL_ALIGNMENTS = new Set<SheetHorizontalAlignment>(['left', 'center', 'right']);
+const VERTICAL_ALIGNMENTS = new Set<SheetVerticalAlignment>(['top', 'middle', 'bottom']);
 const STANDARD_TAGS = new Set([
   'tag:yaml.org,2002:map',
   'tag:yaml.org,2002:seq',
@@ -111,7 +134,12 @@ export function parseSheetDocument(
     return failure('unsupported_format', 'This sheet body format is not supported.');
   }
 
-  const presentation = parsePresentation(root.presentation, limits.maxMerges);
+  const presentation = parsePresentation(
+    root.presentation,
+    limits.maxMerges,
+    limits.maxFormats,
+    limits.maxAlignments
+  );
   if (!presentation.ok) return presentation.result;
 
   const data = parseCsv(envelope.body, options.csvLimits);
@@ -159,12 +187,41 @@ export function serializeSheetDocument(
   }
 
   const merges = [...validation.presentation.merges].sort(compareRanges);
+  const formats = validation.presentation.formats ?? [];
+  const alignments = validation.presentation.alignments ?? [];
   const envelope = ['---', `sheet: ${SHEET_VERSION}`, 'format: csv'];
+  if (merges.length > 0 || formats.length > 0 || alignments.length > 0) {
+    envelope.push('presentation:');
+  }
   if (merges.length > 0) {
-    envelope.push('presentation:', '  merges:');
+    envelope.push('  merges:');
     for (const range of merges) envelope.push(`    - range: ${formatA1Range(range)}`);
   }
+  if (formats.length > 0) {
+    envelope.push('  formats:');
+    for (const rule of formats) {
+      envelope.push(`    - range: ${formatA1CellRange(rule.range)}`);
+      if (rule.bold !== undefined) envelope.push(`      bold: ${String(rule.bold)}`);
+      if (rule.italic !== undefined) envelope.push(`      italic: ${String(rule.italic)}`);
+      if (rule.strikethrough !== undefined) {
+        envelope.push(`      strikethrough: ${String(rule.strikethrough)}`);
+      }
+    }
+  }
+  if (alignments.length > 0) {
+    envelope.push('  alignments:');
+    for (const rule of alignments) {
+      envelope.push(`    - range: ${formatA1CellRange(rule.range)}`);
+      if (rule.horizontal !== undefined) envelope.push(`      horizontal: ${rule.horizontal}`);
+      if (rule.vertical !== undefined) envelope.push(`      vertical: ${rule.vertical}`);
+    }
+  }
   envelope.push('---');
+
+  const frontmatter = `${envelope.slice(1, -1).join(lineEnding)}${lineEnding}`;
+  if (utf8ByteLength(frontmatter) > DEFAULT_MAX_FRONTMATTER_BYTES) {
+    throw new RangeError(`Sheet frontmatter exceeds ${DEFAULT_MAX_FRONTMATTER_BYTES} bytes.`);
+  }
 
   const body = serializeCsv(rows, { lineEnding, bom: false, escapeFormulas: false });
   return `${envelope.join(lineEnding)}${lineEnding}${body}`;
@@ -173,6 +230,8 @@ export function serializeSheetDocument(
 interface ResolvedParserLimits {
   maxFrontmatterBytes: number;
   maxMerges: number;
+  maxFormats: number;
+  maxAlignments: number;
 }
 
 function resolveParserLimits(options: ParseSheetDocumentOptions): ResolvedParserLimits {
@@ -181,13 +240,25 @@ function resolveParserLimits(options: ParseSheetDocumentOptions): ResolvedParser
   }
   const maxFrontmatterBytes = options.maxFrontmatterBytes ?? DEFAULT_MAX_FRONTMATTER_BYTES;
   const maxMerges = options.maxMerges ?? MAX_SHEET_MERGES;
+  const maxFormats = options.maxFormats ?? MAX_SHEET_FORMAT_RULES;
+  const maxAlignments = options.maxAlignments ?? MAX_SHEET_ALIGNMENT_RULES;
   if (!Number.isSafeInteger(maxFrontmatterBytes) || maxFrontmatterBytes <= 0) {
     throw new RangeError('maxFrontmatterBytes must be a positive safe integer.');
   }
   if (!Number.isSafeInteger(maxMerges) || maxMerges <= 0 || maxMerges > MAX_SHEET_MERGES) {
     throw new RangeError(`maxMerges must be between 1 and ${MAX_SHEET_MERGES}.`);
   }
-  return { maxFrontmatterBytes, maxMerges };
+  if (!Number.isSafeInteger(maxFormats) || maxFormats <= 0 || maxFormats > MAX_SHEET_FORMAT_RULES) {
+    throw new RangeError(`maxFormats must be between 1 and ${MAX_SHEET_FORMAT_RULES}.`);
+  }
+  if (
+    !Number.isSafeInteger(maxAlignments) ||
+    maxAlignments <= 0 ||
+    maxAlignments > MAX_SHEET_ALIGNMENT_RULES
+  ) {
+    throw new RangeError(`maxAlignments must be between 1 and ${MAX_SHEET_ALIGNMENT_RULES}.`);
+  }
+  return { maxFrontmatterBytes, maxMerges, maxFormats, maxAlignments };
 }
 
 type EnvelopeResult =
@@ -298,11 +369,21 @@ function parseFrontmatterUnsafe(frontmatter: string): FrontmatterResult {
   return { ok: true, value };
 }
 
-type PresentationResult =
-  | { ok: true; value: { merges: SheetCellRange[] } }
-  | { ok: false; result: SheetDocumentParseResult };
+type ParsedPresentation = {
+  merges: SheetCellRange[];
+  formats?: SheetFormatRule[];
+  alignments?: SheetAlignmentRule[];
+};
 
-function parsePresentation(value: unknown, maxMerges: number): PresentationResult {
+type PresentationResult =
+  { ok: true; value: ParsedPresentation } | { ok: false; result: SheetDocumentParseResult };
+
+function parsePresentation(
+  value: unknown,
+  maxMerges: number,
+  maxFormats: number,
+  maxAlignments: number
+): PresentationResult {
   if (value === undefined) return { ok: true, value: { merges: [] } };
   if (!isRecord(value)) {
     return {
@@ -320,14 +401,30 @@ function parsePresentation(value: unknown, maxMerges: number): PresentationResul
       ),
     };
   }
-  if (value.merges === undefined) return { ok: true, value: { merges: [] } };
-  if (!Array.isArray(value.merges)) {
+  const mergesResult = parseMerges(value.merges, maxMerges);
+  if (!mergesResult.ok) return mergesResult;
+  const formatsResult = parseFormats(value.formats, maxFormats);
+  if (!formatsResult.ok) return formatsResult;
+  const alignmentsResult = parseAlignments(value.alignments, maxAlignments);
+  if (!alignmentsResult.ok) return alignmentsResult;
+
+  const presentation: ParsedPresentation = { merges: mergesResult.value };
+  if (formatsResult.value.length > 0) presentation.formats = formatsResult.value;
+  if (alignmentsResult.value.length > 0) presentation.alignments = alignmentsResult.value;
+  return { ok: true, value: presentation };
+}
+
+type SectionResult<T> = { ok: true; value: T[] } | { ok: false; result: SheetDocumentParseResult };
+
+function parseMerges(value: unknown, maxMerges: number): SectionResult<SheetCellRange> {
+  if (value === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(value)) {
     return {
       ok: false,
       result: failure('invalid_presentation', 'Sheet presentation merges must be a sequence.'),
     };
   }
-  if (value.merges.length > maxMerges) {
+  if (value.length > maxMerges) {
     return {
       ok: false,
       result: failure('too_many_merges', `Sheet presentation exceeds ${maxMerges} merged ranges.`),
@@ -335,7 +432,7 @@ function parsePresentation(value: unknown, maxMerges: number): PresentationResul
   }
 
   const merges: SheetCellRange[] = [];
-  for (const entry of value.merges) {
+  for (const entry of value) {
     if (!isRecord(entry) || firstUnknownKey(entry, MERGE_KEYS) !== null) {
       return {
         ok: false,
@@ -360,7 +457,130 @@ function parsePresentation(value: unknown, maxMerges: number): PresentationResul
     }
     merges.push(range);
   }
-  return { ok: true, value: { merges } };
+  return { ok: true, value: merges };
+}
+
+function parseFormats(value: unknown, maxFormats: number): SectionResult<SheetFormatRule> {
+  if (value === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      result: failure('invalid_presentation', 'Sheet presentation formats must be a sequence.'),
+    };
+  }
+  if (value.length > maxFormats) {
+    return {
+      ok: false,
+      result: failure('too_many_formats', `Sheet presentation exceeds ${maxFormats} format rules.`),
+    };
+  }
+
+  const formats: SheetFormatRule[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || firstUnknownKey(entry, FORMAT_KEYS) !== null) {
+      return {
+        ok: false,
+        result: failure(
+          'invalid_presentation',
+          'Every sheet format must be a mapping containing only range and format properties.'
+        ),
+      };
+    }
+    const range = parsePresentationCellRange(entry.range, 'format');
+    if (!range.ok) return range;
+    const properties = ['bold', 'italic', 'strikethrough'] as const;
+    const supplied = properties.filter((property) => Object.hasOwn(entry, property));
+    if (
+      supplied.length === 0 ||
+      supplied.some((property) => typeof entry[property] !== 'boolean')
+    ) {
+      return {
+        ok: false,
+        result: failure(
+          'invalid_presentation',
+          'Every sheet format must contain at least one boolean format property.'
+        ),
+      };
+    }
+    const rule: SheetFormatRule = { range: range.value };
+    for (const property of supplied) rule[property] = entry[property] as boolean;
+    formats.push(rule);
+  }
+  return { ok: true, value: formats };
+}
+
+function parseAlignments(value: unknown, maxAlignments: number): SectionResult<SheetAlignmentRule> {
+  if (value === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      result: failure('invalid_presentation', 'Sheet presentation alignments must be a sequence.'),
+    };
+  }
+  if (value.length > maxAlignments) {
+    return {
+      ok: false,
+      result: failure(
+        'too_many_alignments',
+        `Sheet presentation exceeds ${maxAlignments} alignment rules.`
+      ),
+    };
+  }
+
+  const alignments: SheetAlignmentRule[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || firstUnknownKey(entry, ALIGNMENT_KEYS) !== null) {
+      return {
+        ok: false,
+        result: failure(
+          'invalid_presentation',
+          'Every sheet alignment must be a mapping containing only range and alignment properties.'
+        ),
+      };
+    }
+    const range = parsePresentationCellRange(entry.range, 'alignment');
+    if (!range.ok) return range;
+    const hasHorizontal = Object.hasOwn(entry, 'horizontal');
+    const hasVertical = Object.hasOwn(entry, 'vertical');
+    if (
+      (!hasHorizontal && !hasVertical) ||
+      (hasHorizontal && !HORIZONTAL_ALIGNMENTS.has(entry.horizontal as SheetHorizontalAlignment)) ||
+      (hasVertical && !VERTICAL_ALIGNMENTS.has(entry.vertical as SheetVerticalAlignment))
+    ) {
+      return {
+        ok: false,
+        result: failure(
+          'invalid_presentation',
+          'Every sheet alignment must contain a supported horizontal or vertical value.'
+        ),
+      };
+    }
+    const rule: SheetAlignmentRule = { range: range.value };
+    if (hasHorizontal) rule.horizontal = entry.horizontal as SheetHorizontalAlignment;
+    if (hasVertical) rule.vertical = entry.vertical as SheetVerticalAlignment;
+    alignments.push(rule);
+  }
+  return { ok: true, value: alignments };
+}
+
+function parsePresentationCellRange(
+  value: unknown,
+  kind: 'format' | 'alignment'
+): { ok: true; value: SheetCellRange } | { ok: false; result: SheetDocumentParseResult } {
+  if (typeof value !== 'string') {
+    return {
+      ok: false,
+      result: failure('invalid_presentation', `Every sheet ${kind} range must be a string.`),
+    };
+  }
+  const range = parseA1CellRange(value);
+  if (range === null) {
+    return {
+      ok: false,
+      result: failure('invalid_presentation', `A sheet ${kind} contains an invalid A1 range.`),
+    };
+  }
+  return { ok: true, value: range };
 }
 
 function snapshotStringRows(rows: readonly (readonly string[])[]): string[][] {

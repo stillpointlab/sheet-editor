@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatA1Range, parseA1Range } from './a1-range';
+import { formatA1CellRange, formatA1Range, parseA1CellRange, parseA1Range } from './a1-range';
 
 describe('A1 merged ranges', () => {
   it.each([
@@ -41,6 +41,28 @@ describe('A1 merged ranges', () => {
     ).toThrowError(RangeError);
     expect(() =>
       formatA1Range({ startRow: -1, endRow: 1, startColumn: 0, endColumn: 2 })
+    ).toThrowError(RangeError);
+  });
+});
+
+describe('A1 formatting cell ranges', () => {
+  it.each([
+    ['A1', { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 }],
+    ['Z2:AA4', { startRow: 1, endRow: 4, startColumn: 25, endColumn: 27 }],
+  ])('parses and formats canonical cell-or-range spelling %s', (source, expected) => {
+    expect(parseA1CellRange(source)).toEqual(expected);
+    expect(formatA1CellRange(expected)).toBe(source);
+  });
+
+  it.each(['A1:A1', 'a1', ' A1', '$A$1', 'Sheet1!A1', 'B2:A1', 'A1,B2'])(
+    'rejects non-canonical cell-or-range spelling %s',
+    (source) => expect(parseA1CellRange(source)).toBeNull()
+  );
+
+  it('does not weaken the merge-only helpers', () => {
+    expect(parseA1Range('A1')).toBeNull();
+    expect(() =>
+      formatA1Range({ startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 })
     ).toThrowError(RangeError);
   });
 });

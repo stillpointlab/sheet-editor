@@ -4,6 +4,8 @@ import { parseCsv } from '../csv';
 
 import { parseSheetDocument, serializeSheetDocument } from './document';
 
+import type { SheetFormatRule } from '../presentation';
+
 const wrap = (frontmatter: string, body = '', lineEnding: '\n' | '\r\n' = '\n'): string =>
   `---${lineEnding}${frontmatter}${lineEnding}---${lineEnding}${body}`;
 
@@ -68,6 +70,55 @@ describe('parseSheetDocument', () => {
     );
   });
 
+  it('parses strict singleton/rectangular format and alignment rules', () => {
+    const result = parseSheetDocument(
+      wrap(
+        [
+          'sheet: stillpoint/v1',
+          'presentation:',
+          '  formats:',
+          '    - range: A1',
+          '      bold: true',
+          '    - range: B1:C2',
+          '      italic: false',
+          '      strikethrough: true',
+          '  alignments:',
+          '    - range: A1:C1',
+          '      horizontal: center',
+          '      vertical: bottom',
+        ].join('\n'),
+        'a,b,c\nd,e,f'
+      )
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      document: {
+        presentation: {
+          merges: [],
+          formats: [
+            {
+              range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+              bold: true,
+            },
+            {
+              range: { startRow: 0, endRow: 2, startColumn: 1, endColumn: 3 },
+              italic: false,
+              strikethrough: true,
+            },
+          ],
+          alignments: [
+            {
+              range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 3 },
+              horizontal: 'center',
+              vertical: 'bottom',
+            },
+          ],
+        },
+      },
+    });
+  });
+
   it('accepts LF and CRLF envelopes while leaving the CSV body to the codec', () => {
     const crlf = parseSheetDocument(
       wrap('sheet: stillpoint/v1\r\nformat: csv', '\uFEFF"a\r\nb",c\r\n1,2', '\r\n')
@@ -129,6 +180,27 @@ describe('parseSheetDocument', () => {
     ],
     ['sheet: stillpoint/v1\npresentation:\n  merges:\n    - range: 1', 'invalid_presentation'],
     ['sheet: stillpoint/v1\npresentation:\n  merges:\n    - range: a1:B1', 'invalid_presentation'],
+    ['sheet: stillpoint/v1\npresentation:\n  formats:\n    - range: A1', 'invalid_presentation'],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  formats:\n    - range: A1\n      bold: yes',
+      'invalid_presentation',
+    ],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  formats:\n    - range: A1:A1\n      bold: true',
+      'invalid_presentation',
+    ],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  formats:\n    - range: A1\n      bold: true\n      color: red',
+      'invalid_presentation',
+    ],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  alignments:\n    - range: A1\n      horizontal: start',
+      'invalid_presentation',
+    ],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  alignments:\n    - range: A1\n      vertical: center',
+      'invalid_presentation',
+    ],
   ])('returns a typed error for invalid frontmatter %#', (frontmatter, code) => {
     expect(parseSheetDocument(wrap(frontmatter))).toEqual(
       expect.objectContaining({ ok: false, error: expect.objectContaining({ code }) })
@@ -148,6 +220,24 @@ describe('parseSheetDocument', () => {
         error: expect.objectContaining({ code: 'too_many_merges' }),
       })
     );
+  });
+
+  it('enforces caller format and alignment limits before parsing entries', () => {
+    const formats = parseSheetDocument(
+      wrap(
+        'sheet: stillpoint/v1\npresentation:\n  formats:\n    - range: invalid\n      bold: true\n    - range: also-invalid\n      bold: true'
+      ),
+      { maxFormats: 1 }
+    );
+    expect(formats).toMatchObject({ ok: false, error: { code: 'too_many_formats' } });
+
+    const alignments = parseSheetDocument(
+      wrap(
+        'sheet: stillpoint/v1\npresentation:\n  alignments:\n    - range: invalid\n      horizontal: left\n    - range: also-invalid\n      horizontal: left'
+      ),
+      { maxAlignments: 1 }
+    );
+    expect(alignments).toMatchObject({ ok: false, error: { code: 'too_many_alignments' } });
   });
 
   it('wraps CSV failures and passes CSV limits through at the body boundary', () => {
@@ -266,6 +356,79 @@ describe('serializeSheetDocument', () => {
     });
     const second = parseSheetDocument(canonical);
     expect(second).toEqual(first);
+  });
+
+  it('canonicalizes overlap precedence, defaults, section order, and rule key order', () => {
+    const source = serializeSheetDocument({
+      rows: [
+        ['a', 'b'],
+        ['c', 'd'],
+      ],
+      presentation: {
+        formats: [
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 2 },
+            bold: true,
+            italic: true,
+          },
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 1, endColumn: 2 },
+            bold: false,
+            strikethrough: true,
+          },
+        ],
+        alignments: [
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 2 },
+            horizontal: 'center',
+            vertical: 'middle',
+          },
+        ],
+      },
+    });
+
+    expect(source).toContain(
+      [
+        'presentation:',
+        '  formats:',
+        '    - range: A1:A2',
+        '      bold: true',
+        '      italic: true',
+        '    - range: B1:B2',
+        '      italic: true',
+        '      strikethrough: true',
+        '  alignments:',
+        '    - range: A1:B2',
+        '      horizontal: center',
+      ].join('\n')
+    );
+    expect(source).not.toContain('bold: false');
+    expect(source).not.toContain('vertical: middle');
+
+    const parsed = parseSheetDocument(source);
+    if (!parsed.ok) throw new Error('expected canonical source to parse');
+    expect(
+      serializeSheetDocument({
+        rows: parsed.document.data.rows,
+        presentation: parsed.document.presentation,
+      })
+    ).toBe(source);
+  });
+
+  it('refuses canonical frontmatter larger than 64 KiB', () => {
+    const rows = Array.from({ length: 1000 }, () => Array<string>(7).fill(''));
+    const formats: SheetFormatRule[] = [];
+    for (let row = 0; row < rows.length; row += 1) {
+      for (let column = row % 2; column < 7; column += 2) {
+        formats.push({
+          range: { startRow: row, endRow: row + 1, startColumn: column, endColumn: column + 1 },
+          bold: true,
+        });
+      }
+    }
+    expect(() => serializeSheetDocument({ rows, presentation: { formats } })).toThrow(
+      'frontmatter exceeds 65536 bytes'
+    );
   });
 
   it('rejects invalid programmatic input instead of writing a destructive document', () => {

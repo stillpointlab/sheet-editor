@@ -17,6 +17,7 @@ import {
 export type SheetPresentationOverride = SheetPresentation | null | undefined;
 
 export interface SheetEditorSourceSession {
+  readonly kind: 'csv' | 'document';
   readonly originalSource: string;
   readonly model: CsvParseResult;
   readonly baselineRows: readonly (readonly string[])[];
@@ -55,6 +56,7 @@ export function createCsvSourceSession(
     });
 
   return {
+    kind: 'csv',
     originalSource: source,
     model,
     baselineRows,
@@ -82,6 +84,7 @@ export function createDocumentSourceSession(
   const parsed = parseSheetDocument(source, { csvLimits: DEFAULT_CSV_LIMITS });
   if (!parsed.ok) {
     return {
+      kind: 'document',
       originalSource: source,
       model: {
         ok: false,
@@ -100,19 +103,21 @@ export function createDocumentSourceSession(
 
   const model = snapshotSuccessfulModel(parsed.document.data);
   const baselineRows = snapshotRows(model.rows);
-  const embeddedPresentation = snapshotSheetPresentation(parsed.document.presentation);
-  const validation = validateSheetPresentation(embeddedPresentation, {
+  const parsedPresentation = snapshotSheetPresentation(parsed.document.presentation);
+  const validation = validateSheetPresentation(parsedPresentation, {
     rows: model.rows,
     totalRows: model.totalRows,
     maxColumns: model.maxColumns,
     headerRow: false,
   });
+  const embeddedPresentation = validation.ok ? validation.presentation : parsedPresentation;
   const editable = !model.truncated && validation.ok;
   const lineEnding = source.startsWith('---\r\n') ? '\r\n' : '\n';
   const serializeRows = (rows: readonly (readonly string[])[]): string =>
     serializeCsv(rows, { lineEnding, bom: false, escapeFormulas: false });
 
   return {
+    kind: 'document',
     originalSource: source,
     model,
     baselineRows,
@@ -191,16 +196,23 @@ function presentationsEqual(left: SheetPresentation, right: SheetPresentation): 
   const leftMerges = sortedMerges(left);
   const rightMerges = sortedMerges(right);
   if (leftMerges.length !== rightMerges.length) return false;
-  return leftMerges.every((range, index) => {
-    const other = rightMerges[index];
-    return (
-      other !== undefined &&
-      range.startRow === other.startRow &&
-      range.endRow === other.endRow &&
-      range.startColumn === other.startColumn &&
-      range.endColumn === other.endColumn
-    );
-  });
+  if (
+    !leftMerges.every((range, index) => {
+      const other = rightMerges[index];
+      return (
+        other !== undefined &&
+        range.startRow === other.startRow &&
+        range.endRow === other.endRow &&
+        range.startColumn === other.startColumn &&
+        range.endColumn === other.endColumn
+      );
+    })
+  )
+    return false;
+  return (
+    JSON.stringify(left.formats ?? []) === JSON.stringify(right.formats ?? []) &&
+    JSON.stringify(left.alignments ?? []) === JSON.stringify(right.alignments ?? [])
+  );
 }
 
 function sortedMerges(presentation: SheetPresentation) {

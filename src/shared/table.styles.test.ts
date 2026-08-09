@@ -31,5 +31,9 @@ describe('shared table styles', () => {
     expect(tableStyles).toContain('overflow-x:auto');
     expect(tableStyles).toContain('.sheet-editor__toolbar-button--delete');
     expect(tableStyles).toContain('--spl-sheet-danger');
+    expect(tableStyles).toContain('.sheet-editor__toolbar-shell');
+    expect(tableStyles).toContain('.sheet-editor__alignment-menu');
+    expect(tableStyles).toContain('position:absolute');
+    expect(tableStyles).toContain('[aria-pressed=mixed]');
   });
 });

@@ -191,7 +191,7 @@ describe('sheet-editor interaction foundation', () => {
 
     expect(dataCells(element)).toHaveLength(6);
     expect(element.shadowRoot?.querySelector('.sheet-surface__notice')?.textContent).toContain(
-      'showing unmerged cells'
+      'showing default presentation'
     );
     activeCell(element).dispatchEvent(key('ArrowRight'));
     expect(report).toHaveBeenCalledTimes(1);

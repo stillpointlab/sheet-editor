@@ -63,7 +63,7 @@
       }
 
       .pane.narrow {
-        width: 360px;
+        width: 260px;
       }
     </style>
   </head>
@@ -92,6 +92,12 @@
           <option value="document-explicit">.sheet explicit CSV format</option>
           <option value="document-override">.sheet call-site replacement</option>
           <option value="document-invalid">.sheet invalid contextual merge</option>
+          <option value="document-formatting">.sheet overlapping/mixed formatting</option>
+          <option value="document-alignments">.sheet all alignments</option>
+          <option value="document-merged-alignment">.sheet merged alignment</option>
+          <option value="document-ragged-format">.sheet ragged formatted slots</option>
+          <option value="document-malformed-format">.sheet malformed formatting</option>
+          <option value="document-over-limit-format">.sheet over-limit formatting</option>
         </select>
       </label>
       <label><input id="readonly" type="checkbox" /> Read-only editor</label>
@@ -104,10 +110,10 @@
         <h2>Interactive sheet selection</h2>
         <div class="pane"><sheet-editor id="editor"></sheet-editor></div>
         <p>
-          Use the toolbar for row/column changes; Left/Right and Home/End move within it, and Escape
-          returns to the grid. Enter quick-edits; F2/double-click caret-edits; Alt/Option+Enter
-          inserts a line break. Escape cancels, Enter/Shift+Enter commit and move, and Ctrl/Cmd+Z
-          undoes in navigation.
+          Document fixtures add emphasis and two alignment flyouts to the row/column tools.
+          Left/Right and Home/End move within the toolbar; Escape returns to the grid. Enter
+          quick-edits; F2/double-click caret-edits; Alt/Option+Enter inserts a line break. Escape
+          cancels, Enter/Shift+Enter commit and move, and Ctrl/Cmd+Z undoes in navigation.
         </p>
         <pre><code id="editor-content"></code></pre>
       </section>

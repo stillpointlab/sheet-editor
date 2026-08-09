@@ -32,19 +32,27 @@ export type {
   SheetSelection,
 } from './interaction';
 export {
+  formatA1CellRange,
   formatA1Range,
+  MAX_SHEET_ALIGNMENT_RULES,
+  MAX_SHEET_FORMAT_RULES,
   MAX_SHEET_MERGES,
+  parseA1CellRange,
   parseA1Range,
   validateSheetPresentation,
 } from './presentation';
 export type {
+  SheetAlignmentRule,
   SheetCellRange,
   SheetContentOptions,
+  SheetFormatRule,
+  SheetHorizontalAlignment,
   SheetPresentation,
   SheetPresentationIssue,
   SheetPresentationIssueCode,
   SheetPresentationValidationContext,
   SheetPresentationValidationResult,
+  SheetVerticalAlignment,
 } from './presentation';
 export { setErrorHandler } from './log';
 export { SheetPreview } from './preview/sheet-preview';
