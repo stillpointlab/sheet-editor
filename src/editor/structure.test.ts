@@ -228,4 +228,79 @@ describe('sheet structure merge transformations', () => {
   it('preserves an omitted merges property', () => {
     expect(transformSheetPresentation({}, { axis: 'row', kind: 'insert', index: 0 })).toEqual({});
   });
+
+  it('transforms format and alignment ranges with merge boundary semantics', () => {
+    const presentation = {
+      formats: [
+        {
+          range: { startRow: 1, endRow: 3, startColumn: 1, endColumn: 4 },
+          bold: true,
+        },
+      ],
+      alignments: [
+        {
+          range: { startRow: 1, endRow: 3, startColumn: 1, endColumn: 4 },
+          horizontal: 'center' as const,
+          vertical: 'bottom' as const,
+        },
+      ],
+    };
+
+    expect(
+      transformSheetPresentation(presentation, { axis: 'row', kind: 'insert', index: 2 })
+    ).toEqual({
+      formats: [
+        {
+          range: { startRow: 1, endRow: 4, startColumn: 1, endColumn: 4 },
+          bold: true,
+        },
+      ],
+      alignments: [
+        {
+          range: { startRow: 1, endRow: 4, startColumn: 1, endColumn: 4 },
+          horizontal: 'center',
+          vertical: 'bottom',
+        },
+      ],
+    });
+    expect(
+      transformSheetPresentation(presentation, { axis: 'column', kind: 'insert', index: 1 })
+        .formats?.[0]?.range
+    ).toEqual({ startRow: 1, endRow: 3, startColumn: 2, endColumn: 5 });
+    expect(presentation.formats[0]?.range).toEqual({
+      startRow: 1,
+      endRow: 3,
+      startColumn: 1,
+      endColumn: 4,
+    });
+  });
+
+  it('keeps a contracted singleton style and drops only an empty style', () => {
+    const presentation = {
+      formats: [
+        {
+          range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 1 },
+          italic: true,
+        },
+      ],
+      alignments: [
+        {
+          range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+          vertical: 'top' as const,
+        },
+      ],
+    };
+
+    expect(
+      transformSheetPresentation(presentation, { axis: 'row', kind: 'delete', index: 0 })
+    ).toEqual({
+      formats: [
+        {
+          range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+          italic: true,
+        },
+      ],
+      alignments: [],
+    });
+  });
 });

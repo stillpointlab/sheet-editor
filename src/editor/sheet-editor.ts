@@ -15,9 +15,14 @@ import {
 import { reportError } from '../log';
 import {
   validateSheetPresentation,
+  type SheetAlignmentRule,
+  type SheetCellRange,
   type SheetContentOptions,
+  type SheetFormatRule,
+  type SheetHorizontalAlignment,
   type SheetPresentation,
   type SheetPresentationIssue,
+  type SheetVerticalAlignment,
 } from '../presentation';
 import { resolveSheetPresentation, snapshotSheetPresentation } from '../presentation/presentation';
 import { columnLabel } from '../shared/column-label';
@@ -28,6 +33,7 @@ import {
   createInvalidPresentationNotice,
   renderTable,
 } from '../shared/render';
+import { createSheetStyleIndex, type SheetStyleIndex } from '../shared/style-index';
 import { tableStyles } from '../shared/table.styles';
 
 import {
@@ -72,6 +78,14 @@ type SheetStructureCommand =
   | 'delete-row'
   | 'delete-column';
 
+type SheetEmphasisProperty = 'bold' | 'italic' | 'strikethrough';
+type SheetAlignmentAxis = 'horizontal' | 'vertical';
+type SheetAlignmentValue = SheetHorizontalAlignment | SheetVerticalAlignment;
+type SheetFormattingCommand = `format-${SheetEmphasisProperty}`;
+type SheetAlignmentCommand = `align-${SheetAlignmentAxis}`;
+type SheetToolbarCommand = SheetStructureCommand | SheetFormattingCommand | SheetAlignmentCommand;
+type SelectionState<T> = T | 'mixed';
+
 interface ToolbarCommandDefinition {
   command: SheetStructureCommand;
   label: string;
@@ -80,6 +94,11 @@ interface ToolbarCommandDefinition {
 }
 
 const HISTORY_LIMIT = 100;
+const EMPHASIS_PROPERTIES: readonly SheetEmphasisProperty[] = ['bold', 'italic', 'strikethrough'];
+const ALIGNMENT_VALUES = {
+  horizontal: ['left', 'center', 'right'],
+  vertical: ['top', 'middle', 'bottom'],
+} as const;
 const TOOLBAR_COMMANDS: readonly ToolbarCommandDefinition[] = [
   {
     command: 'insert-row-above',
@@ -118,6 +137,7 @@ export class SheetEditor extends HTMLElement {
   private resolvedPresentation: SheetPresentation = {};
   private mergeIndex: SheetMergeIndex = createSheetMergeIndex([]);
   private sourceMergeIndex: SheetMergeIndex = createSheetMergeIndex([]);
+  private styleIndex: SheetStyleIndex = createSheetStyleIndex({});
   private presentationIssues: readonly SheetPresentationIssue[] = [];
   private presentationReported = false;
   private bounds: SheetCanvasBounds = { rowCount: 1, columnCount: 1 };
@@ -130,7 +150,8 @@ export class SheetEditor extends HTMLElement {
   private draft: CellDraft | null = null;
   private undoHistory: EditorTransaction[] = [];
   private redoHistory: EditorTransaction[] = [];
-  private toolbarTabCommand: SheetStructureCommand = TOOLBAR_COMMANDS[0].command;
+  private toolbarTabCommand: SheetToolbarCommand = TOOLBAR_COMMANDS[0].command;
+  private openAlignmentMenu: SheetAlignmentAxis | null = null;
   private composing = false;
   private dragPointerId: number | null = null;
   private dragAnchor: SheetCoordinate | null = null;
@@ -160,11 +181,13 @@ export class SheetEditor extends HTMLElement {
 
   connectedCallback(): void {
     window.addEventListener('resize', this.handleOverlayGeometry);
+    document.addEventListener('pointerdown', this.handleDocumentPointerDown, true);
     this.render();
   }
 
   disconnectedCallback(): void {
     window.removeEventListener('resize', this.handleOverlayGeometry);
+    document.removeEventListener('pointerdown', this.handleDocumentPointerDown, true);
   }
 
   attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void {
@@ -173,6 +196,7 @@ export class SheetEditor extends HTMLElement {
       this.cancelDraft(true, false);
       return;
     }
+    if (newValue === 'true') this.closeAlignmentFlyout(false);
     this.root
       .querySelector('[role="grid"]')
       ?.setAttribute('aria-readonly', String(this.isEditingDisabled()));
@@ -216,6 +240,9 @@ export class SheetEditor extends HTMLElement {
   }
 
   private prepareLoad(): void {
+    this.openAlignmentMenu = null;
+    this.toolbarTabCommand =
+      this.sourceSession.kind === 'document' ? 'format-bold' : TOOLBAR_COMMANDS[0].command;
     this.mode = 'navigation';
     this.draft = null;
     this.composing = false;
@@ -227,6 +254,7 @@ export class SheetEditor extends HTMLElement {
     this.presentationReported = false;
     this.mergeIndex = createSheetMergeIndex([]);
     this.sourceMergeIndex = createSheetMergeIndex([]);
+    this.styleIndex = createSheetStyleIndex({});
     this.embeddedPresentation = snapshotSheetPresentation(this.sourceSession.embeddedPresentation);
     this.presentationOverride = snapshotPresentationOverride(
       this.sourceSession.presentationOverride
@@ -259,6 +287,7 @@ export class SheetEditor extends HTMLElement {
     this.presentationIssues = [];
     this.mergeIndex = createSheetMergeIndex([]);
     this.sourceMergeIndex = createSheetMergeIndex([]);
+    this.styleIndex = createSheetStyleIndex({});
     const context = presentationContext(this.committedRows);
     const sourceValidation = validateSheetPresentation(this.embeddedPresentation, context);
     if (!sourceValidation.ok) {
@@ -281,10 +310,12 @@ export class SheetEditor extends HTMLElement {
     }
     this.resolvedPresentation = validation.presentation;
     this.mergeIndex = createSheetMergeIndex(validation.presentation.merges);
+    this.styleIndex = createSheetStyleIndex(validation.presentation);
     return true;
   }
 
   private render(): void {
+    this.openAlignmentMenu = null;
     const model = this.sourceSession.model;
     if (!model.ok || model.truncated) {
       renderTable(this.root, model, {
@@ -343,7 +374,9 @@ export class SheetEditor extends HTMLElement {
           this.committedRows[rowIndex]?.[columnIndex] ?? '',
           rowIndex,
           columnIndex,
-          range
+          range,
+          false,
+          this.styleIndex.styleAt(rowIndex, columnIndex)
         );
         cell.setAttribute('role', 'gridcell');
         if (this.sourceMergeIndex.isCovered(rowIndex, columnIndex)) {
@@ -361,7 +394,7 @@ export class SheetEditor extends HTMLElement {
     }
     table.append(body);
     scroll.append(table);
-    surface.append(this.createToolbar(), scroll);
+    surface.append(this.createToolbarShell(), scroll);
 
     if (this.presentationIssues.length > 0) {
       const notice = createInvalidPresentationNotice();
@@ -374,25 +407,70 @@ export class SheetEditor extends HTMLElement {
     if (this.draft) this.mountDraftControl();
   }
 
+  private createToolbarShell(): HTMLElement {
+    const shell = document.createElement('div');
+    shell.className = 'sheet-editor__toolbar-shell';
+    shell.append(this.createToolbar());
+    if (this.sourceSession.kind === 'document') {
+      shell.append(
+        this.createAlignmentFlyout('horizontal'),
+        this.createAlignmentFlyout('vertical')
+      );
+    }
+    return shell;
+  }
+
   private createToolbar(): HTMLElement {
     const toolbar = document.createElement('div');
     toolbar.className = 'sheet-editor__toolbar';
     toolbar.setAttribute('role', 'toolbar');
-    toolbar.setAttribute('aria-label', 'Sheet structure');
+    toolbar.setAttribute('aria-label', 'Sheet tools');
 
-    const enabledCommands = TOOLBAR_COMMANDS.filter(({ command }) =>
-      this.isStructureCommandEnabled(command)
+    const visibleCommands = this.visibleToolbarCommands();
+    const enabledCommands = visibleCommands.filter((command) =>
+      this.isToolbarCommandEnabled(command)
     );
-    if (!enabledCommands.some(({ command }) => command === this.toolbarTabCommand)) {
-      this.toolbarTabCommand = enabledCommands[0]?.command ?? TOOLBAR_COMMANDS[0].command;
+    if (!enabledCommands.includes(this.toolbarTabCommand)) {
+      this.toolbarTabCommand =
+        enabledCommands[0] ?? visibleCommands[0] ?? TOOLBAR_COMMANDS[0].command;
+    }
+
+    if (this.sourceSession.kind === 'document') {
+      const emphasis = document.createElement('div');
+      emphasis.className = 'sheet-editor__toolbar-group';
+      emphasis.setAttribute('role', 'group');
+      emphasis.setAttribute('aria-label', 'Text emphasis');
+      for (const property of EMPHASIS_PROPERTIES) {
+        const command: SheetFormattingCommand = `format-${property}`;
+        const label = emphasisLabel(property);
+        const button = this.createToolbarButton(command, label);
+        button.dataset.sheetFormat = property;
+        button.setAttribute('aria-pressed', 'false');
+        button.innerHTML = formattingIcon(property);
+        emphasis.append(button);
+      }
+      toolbar.append(emphasis, createToolbarSeparator());
+
+      const alignment = document.createElement('div');
+      alignment.className = 'sheet-editor__toolbar-group';
+      alignment.setAttribute('role', 'group');
+      alignment.setAttribute('aria-label', 'Cell alignment');
+      for (const axis of ['horizontal', 'vertical'] as const) {
+        const command: SheetAlignmentCommand = `align-${axis}`;
+        const button = this.createToolbarButton(command, `${axisLabel(axis)} alignment`);
+        button.classList.add('sheet-editor__toolbar-button--flyout');
+        button.dataset.sheetAlignmentTrigger = axis;
+        button.setAttribute('aria-haspopup', 'menu');
+        button.setAttribute('aria-expanded', 'false');
+        button.setAttribute('aria-controls', alignmentMenuId(axis));
+        alignment.append(button);
+      }
+      toolbar.append(alignment, createToolbarSeparator());
     }
 
     for (const groupName of ['insert', 'delete'] as const) {
       if (groupName === 'delete') {
-        const separator = document.createElement('span');
-        separator.className = 'sheet-editor__toolbar-separator';
-        separator.setAttribute('aria-hidden', 'true');
-        toolbar.append(separator);
+        toolbar.append(createToolbarSeparator());
       }
       const group = document.createElement('div');
       group.className = 'sheet-editor__toolbar-group';
@@ -402,15 +480,9 @@ export class SheetEditor extends HTMLElement {
         groupName === 'insert' ? 'Insert rows and columns' : 'Delete rows and columns'
       );
       for (const definition of TOOLBAR_COMMANDS.filter(({ group }) => group === groupName)) {
-        const button = document.createElement('button');
-        const enabled = this.isStructureCommandEnabled(definition.command);
-        button.type = 'button';
-        button.className = `sheet-editor__toolbar-button sheet-editor__toolbar-button--${definition.group}`;
+        const button = this.createToolbarButton(definition.command, definition.label);
+        button.classList.add(`sheet-editor__toolbar-button--${definition.group}`);
         button.dataset.sheetCommand = definition.command;
-        button.setAttribute('aria-label', definition.label);
-        button.title = definition.label;
-        button.disabled = !enabled;
-        button.tabIndex = enabled && definition.command === this.toolbarTabCommand ? 0 : -1;
         button.innerHTML = structureIcon(definition.icon);
         group.append(button);
       }
@@ -419,32 +491,96 @@ export class SheetEditor extends HTMLElement {
     return toolbar;
   }
 
+  private createToolbarButton(command: SheetToolbarCommand, label: string): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'sheet-editor__toolbar-button';
+    button.dataset.sheetToolbarCommand = command;
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.disabled = !this.isToolbarCommandEnabled(command);
+    button.tabIndex = !button.disabled && command === this.toolbarTabCommand ? 0 : -1;
+    return button;
+  }
+
+  private createAlignmentFlyout(axis: SheetAlignmentAxis): HTMLElement {
+    const menu = document.createElement('div');
+    menu.id = alignmentMenuId(axis);
+    menu.className = 'sheet-editor__alignment-menu';
+    menu.dataset.sheetAlignmentMenu = axis;
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
+    for (const value of ALIGNMENT_VALUES[axis]) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'sheet-editor__alignment-item';
+      item.dataset.sheetAlignmentAxis = axis;
+      item.dataset.sheetAlignmentValue = value;
+      item.setAttribute('role', 'menuitemradio');
+      item.setAttribute('aria-checked', 'false');
+      item.tabIndex = -1;
+      item.innerHTML = `${alignmentIcon(axis, value)}<span>${titleCase(value)}</span>`;
+      menu.append(item);
+    }
+    return menu;
+  }
+
   private syncToolbarState(): void {
-    const buttons = [...this.root.querySelectorAll<HTMLButtonElement>('[data-sheet-command]')];
+    const buttons = [
+      ...this.root.querySelectorAll<HTMLButtonElement>('[data-sheet-toolbar-command]'),
+    ];
     if (buttons.length === 0) return;
     const enabledButtons = buttons.filter((button) => {
-      const command = structureCommandFromButton(button);
-      const enabled = command !== null && this.isStructureCommandEnabled(command);
+      const command = toolbarCommandFromButton(button);
+      const enabled = command !== null && this.isToolbarCommandEnabled(command);
       button.disabled = !enabled;
+      const property = emphasisPropertyFromButton(button);
+      if (property) {
+        button.setAttribute('aria-pressed', String(this.emphasisSelectionState(property)));
+      }
+      const axis = alignmentAxisFromTrigger(button);
+      if (axis) this.syncAlignmentTrigger(button, axis);
       return enabled;
     });
-    if (!enabledButtons.some((button) => button.dataset.sheetCommand === this.toolbarTabCommand)) {
-      const command = enabledButtons[0] ? structureCommandFromButton(enabledButtons[0]) : null;
+    if (
+      !enabledButtons.some(
+        (button) => button.dataset.sheetToolbarCommand === this.toolbarTabCommand
+      )
+    ) {
+      const command = enabledButtons[0] ? toolbarCommandFromButton(enabledButtons[0]) : null;
       if (command) this.toolbarTabCommand = command;
     }
     for (const button of buttons) {
       button.tabIndex =
-        !button.disabled && button.dataset.sheetCommand === this.toolbarTabCommand ? 0 : -1;
+        !button.disabled && button.dataset.sheetToolbarCommand === this.toolbarTabCommand ? 0 : -1;
+    }
+    for (const axis of ['horizontal', 'vertical'] as const) this.syncAlignmentMenuState(axis);
+    if (
+      this.openAlignmentMenu &&
+      !this.isToolbarCommandEnabled(`align-${this.openAlignmentMenu}`)
+    ) {
+      this.closeAlignmentFlyout(false);
     }
   }
 
   private readonly handleToolbarClick = (event: Event): void => {
     const target = event.target;
+    const menuItem =
+      target instanceof Element
+        ? target.closest<HTMLButtonElement>('button[data-sheet-alignment-axis]')
+        : null;
+    if (menuItem) {
+      const choice = alignmentChoiceFromButton(menuItem);
+      if (!choice || menuItem.disabled) return;
+      event.preventDefault();
+      this.runAlignmentCommand(choice.axis, choice.value);
+      return;
+    }
     const button =
       target instanceof Element
-        ? target.closest<HTMLButtonElement>('button[data-sheet-command]')
+        ? target.closest<HTMLButtonElement>('button[data-sheet-toolbar-command]')
         : null;
-    const command = button ? structureCommandFromButton(button) : null;
+    const command = button ? toolbarCommandFromButton(button) : null;
     if (!button || !command || button.disabled) return;
     event.preventDefault();
     if (this.composing) {
@@ -452,12 +588,27 @@ export class SheetEditor extends HTMLElement {
       return;
     }
     this.toolbarTabCommand = command;
-    this.runStructureCommand(command);
+    if (isStructureCommand(command)) this.runStructureCommand(command);
+    else if (command.startsWith('format-')) {
+      this.runEmphasisCommand(command.slice('format-'.length) as SheetEmphasisProperty);
+    } else {
+      const axis = command.slice('align-'.length) as SheetAlignmentAxis;
+      if (this.openAlignmentMenu === axis) this.closeAlignmentFlyout(true);
+      else this.openAlignmentFlyout(axis);
+    }
   };
 
   private handleToolbarKeyDown(event: KeyboardEvent, button: HTMLButtonElement): void {
+    const axis = alignmentAxisFromTrigger(button);
+    if (axis && ['Enter', ' ', 'ArrowDown'].includes(event.key)) {
+      event.preventDefault();
+      this.toolbarTabCommand = `align-${axis}`;
+      this.openAlignmentFlyout(axis);
+      return;
+    }
     if (event.key === 'Escape') {
       event.preventDefault();
+      if (this.openAlignmentMenu) this.closeAlignmentFlyout(false);
       this.focusActiveCell({ preventScroll: true });
       return;
     }
@@ -481,11 +632,304 @@ export class SheetEditor extends HTMLElement {
     }
     const next = buttons[nextIndex];
     if (!next) return;
-    const command = structureCommandFromButton(next);
+    const command = toolbarCommandFromButton(next);
     if (!command) return;
     this.toolbarTabCommand = command;
     this.syncToolbarState();
     next.focus();
+  }
+
+  private handleAlignmentMenuKeyDown(event: KeyboardEvent, item: HTMLButtonElement): void {
+    const choice = alignmentChoiceFromButton(item);
+    if (!choice) return;
+    const menu = item.closest<HTMLElement>('[role="menu"]');
+    const items = menu
+      ? [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+      : [];
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.closeAlignmentFlyout(true);
+      return;
+    }
+    if (event.key === 'Tab') {
+      this.closeAlignmentFlyout(true);
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      this.runAlignmentCommand(choice.axis, choice.value);
+      return;
+    }
+    if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) || items.length === 0) return;
+    event.preventDefault();
+    const currentIndex = Math.max(0, items.indexOf(item));
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : event.key === 'ArrowUp'
+            ? (currentIndex - 1 + items.length) % items.length
+            : (currentIndex + 1) % items.length;
+    items[nextIndex]?.focus();
+  }
+
+  private runEmphasisCommand(property: SheetEmphasisProperty): void {
+    const command: SheetFormattingCommand = `format-${property}`;
+    if (this.draft) {
+      const scrollPosition = this.captureScrollPosition();
+      this.commitDraft(null, false);
+      this.restoreScrollPosition(scrollPosition);
+    }
+    if (!this.isToolbarCommandEnabled(command)) {
+      this.focusToolbarCommand(command);
+      return;
+    }
+    const rule: SheetFormatRule = {
+      range: { ...this.selection.range },
+      [property]: this.emphasisSelectionState(property) !== true,
+    };
+    const candidate: SheetPresentation = {
+      ...snapshotSheetPresentation(this.embeddedPresentation),
+      formats: [...(this.embeddedPresentation.formats ?? []), rule],
+    };
+    this.installPresentationCandidate(candidate, command);
+  }
+
+  private runAlignmentCommand(axis: SheetAlignmentAxis, value: SheetAlignmentValue): void {
+    const command: SheetAlignmentCommand = `align-${axis}`;
+    if (this.draft) {
+      const scrollPosition = this.captureScrollPosition();
+      this.commitDraft(null, false);
+      this.restoreScrollPosition(scrollPosition);
+    }
+    if (!this.isToolbarCommandEnabled(command)) {
+      this.closeAlignmentFlyout(false);
+      this.focusToolbarCommand(command);
+      return;
+    }
+    if (this.alignmentSelectionState(axis) === value) {
+      this.closeAlignmentFlyout(false);
+      this.focusToolbarCommand(command);
+      return;
+    }
+    const rule: SheetAlignmentRule =
+      axis === 'horizontal'
+        ? { range: { ...this.selection.range }, horizontal: value as SheetHorizontalAlignment }
+        : { range: { ...this.selection.range }, vertical: value as SheetVerticalAlignment };
+    const candidate: SheetPresentation = {
+      ...snapshotSheetPresentation(this.embeddedPresentation),
+      alignments: [...(this.embeddedPresentation.alignments ?? []), rule],
+    };
+    this.installPresentationCandidate(candidate, command);
+  }
+
+  private installPresentationCandidate(
+    candidate: SheetPresentation,
+    focusCommand: SheetFormattingCommand | SheetAlignmentCommand
+  ): void {
+    const validation = validateSheetPresentation(
+      candidate,
+      presentationContext(this.committedRows)
+    );
+    if (!validation.ok) {
+      this.closeAlignmentFlyout(false);
+      this.showStructureError(
+        validation.issues[0]?.message ?? 'The presentation change is invalid.'
+      );
+      this.focusToolbarCommand(focusCommand);
+      return;
+    }
+    if (!this.sourceSession.validateCandidate(this.committedRows, validation.presentation)) {
+      this.closeAlignmentFlyout(false);
+      this.showStructureError('The presentation change exceeds a document serialization limit.');
+      this.focusToolbarCommand(focusCommand);
+      return;
+    }
+
+    const previousSource = this.getContent();
+    const before = this.createSnapshot();
+    const scrollPosition = this.captureScrollPosition();
+    this.embeddedPresentation = validation.presentation;
+    this.rebuildPresentationState();
+    const after = this.createSnapshot();
+    this.pushHistory({ before, after });
+    if (this.isConnected) this.render();
+    this.restoreScrollPosition(scrollPosition);
+    this.focusToolbarCommand(focusCommand);
+    this.emitIfChanged(previousSource);
+  }
+
+  private emphasisSelectionState(property: SheetEmphasisProperty): SelectionState<boolean> {
+    let state: boolean | undefined;
+    let mixed = false;
+    forEachCell(this.selection.range, (row, column) => {
+      const value = this.styleIndex.styleAt(row, column)[property];
+      if (state === undefined) state = value;
+      else if (state !== value) mixed = true;
+    });
+    return mixed ? 'mixed' : (state ?? false);
+  }
+
+  private alignmentSelectionState<T extends SheetAlignmentAxis>(
+    axis: T
+  ): SelectionState<T extends 'horizontal' ? SheetHorizontalAlignment : SheetVerticalAlignment> {
+    let state: SheetAlignmentValue | 'mixed' | undefined;
+    forEachCell(this.selection.range, (row, column) => {
+      const value = this.styleIndex.styleAt(row, column)[axis];
+      if (state === undefined) state = value;
+      else if (state !== value) state = 'mixed';
+    });
+    return (state ?? (axis === 'horizontal' ? 'left' : 'middle')) as SelectionState<
+      T extends 'horizontal' ? SheetHorizontalAlignment : SheetVerticalAlignment
+    >;
+  }
+
+  private activeAlignment(axis: SheetAlignmentAxis): SheetAlignmentValue {
+    return this.styleIndex.styleAt(this.selection.active.row, this.selection.active.column)[axis];
+  }
+
+  private syncAlignmentTrigger(button: HTMLButtonElement, axis: SheetAlignmentAxis): void {
+    const state = this.alignmentSelectionState(axis);
+    const label = `${axisLabel(axis)} alignment: ${titleCase(state)}`;
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.dataset.sheetAlignmentState = state;
+    button.setAttribute('aria-expanded', String(this.openAlignmentMenu === axis));
+    button.innerHTML = `${alignmentIcon(axis, state)}${chevronIcon()}`;
+  }
+
+  private syncAlignmentMenuState(axis: SheetAlignmentAxis): void {
+    const menu = this.root.querySelector<HTMLElement>(`[data-sheet-alignment-menu="${axis}"]`);
+    if (!menu) return;
+    const state = this.alignmentSelectionState(axis);
+    menu.setAttribute('aria-label', `${axisLabel(axis)} alignment, ${titleCase(state)}`);
+    for (const item of menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')) {
+      item.setAttribute(
+        'aria-checked',
+        String(state !== 'mixed' && item.dataset.sheetAlignmentValue === state)
+      );
+      item.disabled = !this.isToolbarCommandEnabled(`align-${axis}`);
+    }
+  }
+
+  private openAlignmentFlyout(axis: SheetAlignmentAxis): void {
+    const command: SheetAlignmentCommand = `align-${axis}`;
+    if (!this.isToolbarCommandEnabled(command)) return;
+    if (this.openAlignmentMenu && this.openAlignmentMenu !== axis) {
+      this.closeAlignmentFlyout(false);
+    }
+    this.openAlignmentMenu = axis;
+    const menu = this.root.querySelector<HTMLElement>(`[data-sheet-alignment-menu="${axis}"]`);
+    const trigger = this.alignmentTrigger(axis);
+    if (!menu || !trigger) {
+      this.openAlignmentMenu = null;
+      return;
+    }
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    this.syncAlignmentMenuState(axis);
+    this.positionAlignmentFlyout(axis);
+    const value = this.activeAlignment(axis);
+    menu
+      .querySelector<HTMLButtonElement>(`[data-sheet-alignment-value="${value}"]`)
+      ?.focus({ preventScroll: true });
+  }
+
+  private closeAlignmentFlyout(focusTrigger: boolean): void {
+    const axis = this.openAlignmentMenu;
+    if (!axis) return;
+    const menu = this.root.querySelector<HTMLElement>(`[data-sheet-alignment-menu="${axis}"]`);
+    const trigger = this.alignmentTrigger(axis);
+    if (menu) menu.hidden = true;
+    trigger?.setAttribute('aria-expanded', 'false');
+    this.openAlignmentMenu = null;
+    if (focusTrigger) trigger?.focus({ preventScroll: true });
+  }
+
+  private positionAlignmentFlyout(axis: SheetAlignmentAxis): void {
+    const shell = this.root.querySelector<HTMLElement>('.sheet-editor__toolbar-shell');
+    const menu = this.root.querySelector<HTMLElement>(`[data-sheet-alignment-menu="${axis}"]`);
+    const trigger = this.alignmentTrigger(axis);
+    if (!shell || !menu || !trigger || menu.hidden) return;
+    const shellRect = shell.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+    const menuWidth = menu.getBoundingClientRect().width || 152;
+    const maximum = Math.max(0, shellRect.width - menuWidth);
+    menu.style.left = `${Math.min(maximum, Math.max(0, triggerRect.left - shellRect.left))}px`;
+  }
+
+  private readonly handleDocumentPointerDown = (event: PointerEvent): void => {
+    const axis = this.openAlignmentMenu;
+    if (!axis) return;
+    const menu = this.root.querySelector<HTMLElement>(`[data-sheet-alignment-menu="${axis}"]`);
+    const trigger = this.alignmentTrigger(axis);
+    const path = event.composedPath();
+    if ((menu && path.includes(menu)) || (trigger && path.includes(trigger))) return;
+    this.closeAlignmentFlyout(false);
+  };
+
+  private alignmentTrigger(axis: SheetAlignmentAxis): HTMLButtonElement | null {
+    return this.root.querySelector<HTMLButtonElement>(`[data-sheet-alignment-trigger="${axis}"]`);
+  }
+
+  private focusToolbarCommand(command: SheetToolbarCommand): void {
+    this.root
+      .querySelector<HTMLButtonElement>(`[data-sheet-toolbar-command="${command}"]`)
+      ?.focus({ preventScroll: true });
+  }
+
+  private captureScrollPosition(): { left: number; top: number } {
+    const scroll = this.root.querySelector<HTMLElement>('.sheet-surface__scroll');
+    return { left: scroll?.scrollLeft ?? 0, top: scroll?.scrollTop ?? 0 };
+  }
+
+  private restoreScrollPosition(position: { left: number; top: number }): void {
+    const scroll = this.root.querySelector<HTMLElement>('.sheet-surface__scroll');
+    if (!scroll) return;
+    scroll.scrollLeft = position.left;
+    scroll.scrollTop = position.top;
+  }
+
+  private visibleToolbarCommands(): SheetToolbarCommand[] {
+    const structure = TOOLBAR_COMMANDS.map(({ command }) => command);
+    if (this.sourceSession.kind !== 'document') return structure;
+    return [
+      ...EMPHASIS_PROPERTIES.map((property): SheetFormattingCommand => `format-${property}`),
+      'align-horizontal',
+      'align-vertical',
+      ...structure,
+    ];
+  }
+
+  private isToolbarCommandEnabled(command: SheetToolbarCommand): boolean {
+    if (isStructureCommand(command)) return this.isStructureCommandEnabled(command);
+    const section = command.startsWith('format-') ? 'formats' : 'alignments';
+    return (
+      this.canMutate() &&
+      !this.composing &&
+      this.sourceSession.kind === 'document' &&
+      this.presentationIssues.length === 0 &&
+      this.selectionIsMaterialized() &&
+      this.embeddedOwnsSection(section)
+    );
+  }
+
+  private selectionIsMaterialized(): boolean {
+    return (
+      this.committedRows.length > 0 &&
+      widestRow(this.committedRows) > 0 &&
+      this.selection.range.endRow <= this.committedRows.length &&
+      this.selection.range.endColumn <= widestRow(this.committedRows)
+    );
+  }
+
+  private embeddedOwnsSection(section: 'formats' | 'alignments'): boolean {
+    const override = this.presentationOverride;
+    return (
+      override === undefined ||
+      (override !== null && (!Object.hasOwn(override, section) || override[section] === undefined))
+    );
   }
 
   private runStructureCommand(command: SheetStructureCommand): void {
@@ -511,7 +955,14 @@ export class SheetEditor extends HTMLElement {
       presentationContext(this.committedRows)
     ).ok;
     const rows = applySheetStructure(this.committedRows, operation);
-    const embeddedPresentation = transformSheetPresentation(this.embeddedPresentation, operation);
+    const transformedEmbedded = transformSheetPresentation(this.embeddedPresentation, operation);
+    const transformedValidation = validateSheetPresentation(
+      transformedEmbedded,
+      presentationContext(rows)
+    );
+    const embeddedPresentation = transformedValidation.ok
+      ? transformedValidation.presentation
+      : transformedEmbedded;
     const presentationOverride = currentViewValid
       ? transformPresentationOverride(this.presentationOverride, operation)
       : snapshotPresentationOverride(this.presentationOverride);
@@ -625,7 +1076,7 @@ export class SheetEditor extends HTMLElement {
     }
     const context = presentationContext(rows);
     if (!validateSheetPresentation(embeddedPresentation, context).ok) {
-      return 'The structural change would make merged-cell presentation invalid.';
+      return 'The structural change would make sheet presentation invalid.';
     }
     if (
       requireValidView &&
@@ -634,7 +1085,7 @@ export class SheetEditor extends HTMLElement {
         context
       ).ok
     ) {
-      return 'The structural change would make merged-cell presentation invalid.';
+      return 'The structural change would make sheet presentation invalid.';
     }
     if (!this.sourceSession.validateCandidate(rows, embeddedPresentation)) {
       return 'The structural change could not be serialized safely.';
@@ -677,8 +1128,23 @@ export class SheetEditor extends HTMLElement {
     const target = keyboardEvent.target;
     const toolbarButton =
       target instanceof Element
-        ? target.closest<HTMLButtonElement>('button[data-sheet-command]')
+        ? target.closest<HTMLButtonElement>('button[data-sheet-toolbar-command]')
         : null;
+    const menuItem =
+      target instanceof Element
+        ? target.closest<HTMLButtonElement>('button[data-sheet-alignment-axis]')
+        : null;
+    if ((toolbarButton || menuItem) && isUndoShortcut(keyboardEvent)) {
+      if (!this.canMutate()) return;
+      keyboardEvent.preventDefault();
+      if (keyboardEvent.key.toLowerCase() === 'y' || keyboardEvent.shiftKey) this.redo();
+      else this.undo();
+      return;
+    }
+    if (menuItem) {
+      this.handleAlignmentMenuKeyDown(keyboardEvent, menuItem);
+      return;
+    }
     if (toolbarButton) {
       this.handleToolbarKeyDown(keyboardEvent, toolbarButton);
       return;
@@ -1160,6 +1626,7 @@ export class SheetEditor extends HTMLElement {
   private readonly handleOverlayGeometry = (): void => {
     const textarea = this.editControl();
     if (textarea) this.resizeDraftControl(textarea);
+    if (this.openAlignmentMenu) this.positionAlignmentFlyout(this.openAlignmentMenu);
   };
 
   private cellFromEvent(event: PointerEvent, usePoint = false): HTMLElement | null {
@@ -1268,7 +1735,7 @@ export class SheetEditor extends HTMLElement {
   private reportPresentationIssues(): void {
     if (this.presentationReported || this.presentationIssues.length === 0) return;
     this.presentationReported = true;
-    reportError('Merged-cell presentation is invalid.', this.presentationIssues);
+    reportError('Sheet presentation is invalid.', this.presentationIssues);
   }
 }
 
@@ -1346,15 +1813,82 @@ function transformPresentationOverride(
 ): SheetPresentationOverride {
   const snapshot = snapshotPresentationOverride(override);
   if (snapshot === null || snapshot === undefined) return snapshot;
-  if (!Object.hasOwn(snapshot, 'merges') || snapshot.merges === undefined) return snapshot;
   return transformSheetPresentation(snapshot, operation);
 }
 
-function structureCommandFromButton(button: HTMLButtonElement): SheetStructureCommand | null {
-  const command = button.dataset.sheetCommand;
-  return TOOLBAR_COMMANDS.some((definition) => definition.command === command)
-    ? (command as SheetStructureCommand)
+function isStructureCommand(command: string): command is SheetStructureCommand {
+  return TOOLBAR_COMMANDS.some((definition) => definition.command === command);
+}
+
+function toolbarCommandFromButton(button: HTMLButtonElement): SheetToolbarCommand | null {
+  const command = button.dataset.sheetToolbarCommand;
+  if (!command) return null;
+  if (isStructureCommand(command)) return command;
+  if (
+    EMPHASIS_PROPERTIES.some((property) => command === `format-${property}`) ||
+    command === 'align-horizontal' ||
+    command === 'align-vertical'
+  ) {
+    return command as SheetToolbarCommand;
+  }
+  return null;
+}
+
+function emphasisPropertyFromButton(button: HTMLButtonElement): SheetEmphasisProperty | null {
+  const property = button.dataset.sheetFormat;
+  return EMPHASIS_PROPERTIES.includes(property as SheetEmphasisProperty)
+    ? (property as SheetEmphasisProperty)
     : null;
+}
+
+function alignmentAxisFromTrigger(button: HTMLButtonElement): SheetAlignmentAxis | null {
+  const axis = button.dataset.sheetAlignmentTrigger;
+  return axis === 'horizontal' || axis === 'vertical' ? axis : null;
+}
+
+function alignmentChoiceFromButton(
+  button: HTMLButtonElement
+): { axis: SheetAlignmentAxis; value: SheetAlignmentValue } | null {
+  const axis = button.dataset.sheetAlignmentAxis;
+  const value = button.dataset.sheetAlignmentValue;
+  if (axis === 'horizontal' && ALIGNMENT_VALUES.horizontal.includes(value as never)) {
+    return { axis, value: value as SheetHorizontalAlignment };
+  }
+  if (axis === 'vertical' && ALIGNMENT_VALUES.vertical.includes(value as never)) {
+    return { axis, value: value as SheetVerticalAlignment };
+  }
+  return null;
+}
+
+function createToolbarSeparator(): HTMLElement {
+  const separator = document.createElement('span');
+  separator.className = 'sheet-editor__toolbar-separator';
+  separator.setAttribute('aria-hidden', 'true');
+  return separator;
+}
+
+function emphasisLabel(property: SheetEmphasisProperty): string {
+  return property === 'strikethrough' ? 'Strikethrough' : titleCase(property);
+}
+
+function axisLabel(axis: SheetAlignmentAxis): string {
+  return axis === 'horizontal' ? 'Horizontal' : 'Vertical';
+}
+
+function titleCase(value: string): string {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+function alignmentMenuId(axis: SheetAlignmentAxis): string {
+  return `sheet-editor-${axis}-alignment-menu`;
+}
+
+function forEachCell(range: SheetCellRange, visit: (row: number, column: number) => void): void {
+  for (let row = range.startRow; row < range.endRow; row += 1) {
+    for (let column = range.startColumn; column < range.endColumn; column += 1) {
+      visit(row, column);
+    }
+  }
 }
 
 const STRUCTURE_ICONS: Readonly<Record<string, string>> = {
@@ -1369,7 +1903,45 @@ const STRUCTURE_ICONS: Readonly<Record<string, string>> = {
 };
 
 function structureIcon(name: string): string {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">${STRUCTURE_ICONS[name] ?? ''}</svg>`;
+  return iconSvg(STRUCTURE_ICONS[name] ?? '');
+}
+
+function formattingIcon(property: SheetEmphasisProperty): string {
+  const content =
+    property === 'bold'
+      ? '<path d="M7 4h6.2a4 4 0 0 1 2.5 7.1A4.5 4.5 0 0 1 13 20H7zm3 3v3h3a1.5 1.5 0 0 0 0-3zm0 6v4h3.3a2 2 0 0 0 0-4z" fill="currentColor"/>'
+      : property === 'italic'
+        ? '<path d="M9 4v3h2.2l-2.4 10H6v3h8v-3h-2.2l2.4-10H17V4z" fill="currentColor"/>'
+        : '<path d="M7.2 5.3A7.8 7.8 0 0 1 12 4c2.2 0 4 .7 5.4 1.8l-1.8 2A5.7 5.7 0 0 0 12 6.7c-1.6 0-2.6.6-2.6 1.5 0 .8.7 1.2 3.5 1.8H19v2H5v-2h3c-1-.5-1.6-1.3-1.6-2.4 0-.9.3-1.7.8-2.3M5 14h3c.4 1.8 1.8 2.8 4.2 2.8 1.8 0 2.8-.6 2.8-1.6 0-.5-.2-.9-.7-1.2h3.5c.2.5.2.9.2 1.4 0 2.6-2.2 4.3-5.9 4.3-4 0-6.5-2-7.1-5.7" fill="currentColor"/>';
+  return iconSvg(content);
+}
+
+function alignmentIcon(axis: SheetAlignmentAxis, value: SheetAlignmentValue | 'mixed'): string {
+  if (value === 'mixed') {
+    return iconSvg(
+      axis === 'horizontal'
+        ? '<path d="M4 5h10v2H4zm6 5h10v2H10zm-6 5h13v2H4z" fill="currentColor"/>'
+        : '<path d="M5 4h2v10H5zm5 6h2v10h-2zm5-4h2v11h-2z" fill="currentColor"/>'
+    );
+  }
+  if (axis === 'horizontal') {
+    const starts = value === 'left' ? [4, 4, 4] : value === 'right' ? [8, 4, 8] : [6, 4, 6];
+    return iconSvg(
+      `<path d="M${starts[0]} 5h12v2H${starts[0]}zM${starts[1]} 10h16v2H${starts[1]}zM${starts[2]} 15h12v2H${starts[2]}z" fill="currentColor"/>`
+    );
+  }
+  const rows = value === 'top' ? [4, 8, 12] : value === 'bottom' ? [12, 16, 20] : [8, 12, 16];
+  return iconSvg(
+    `<path d="M4 ${rows[0]}h16v2H4zM6 ${rows[1]}h12v2H6zM4 ${rows[2]}h16v2H4z" fill="currentColor"/>`
+  );
+}
+
+function chevronIcon(): string {
+  return '<svg class="sheet-editor__toolbar-chevron" viewBox="0 0 8 8" width="8" height="8" aria-hidden="true" focusable="false"><path d="m1 2 3 3 3-3z" fill="currentColor"/></svg>';
+}
+
+function iconSvg(content: string): string {
+  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">${content}</svg>`;
 }
 
 function coordinateFromCell(cell: HTMLElement): SheetCoordinate | null {

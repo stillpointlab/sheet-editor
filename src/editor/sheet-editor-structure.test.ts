@@ -78,7 +78,7 @@ describe('sheet-editor structure toolbar', () => {
     const toolbar = element.shadowRoot?.querySelector('[role="toolbar"]');
     const buttons = toolbarButtons(element);
 
-    expect(toolbar?.getAttribute('aria-label')).toBe('Sheet structure');
+    expect(toolbar?.getAttribute('aria-label')).toBe('Sheet tools');
     expect(buttons.map((item) => item.getAttribute('aria-label'))).toEqual(
       ACTION_CASES.map(({ label }) => label)
     );
@@ -481,6 +481,46 @@ describe('sheet-editor structure toolbar', () => {
       { startRow: 2, endRow: 3, startColumn: 1, endColumn: 3 },
     ]);
     expect(documentRows(element)).toHaveLength(3);
+  });
+
+  it('normalizes transformed format and alignment rectangles in the structural transaction', () => {
+    const source = [
+      '---',
+      'sheet: stillpoint/v1',
+      'presentation:',
+      '  formats:',
+      '    - range: A1',
+      '      bold: true',
+      '    - range: C1',
+      '      bold: true',
+      '  alignments:',
+      '    - range: A1',
+      '      vertical: top',
+      '    - range: C1',
+      '      vertical: top',
+      '---',
+      'a,b,c',
+    ].join('\n');
+    const element = createDocument(source);
+    pointerDown(dataCell(element, 0, 1));
+
+    button(element, 'Delete column').click();
+
+    expect(documentRows(element)).toEqual([['a', 'c']]);
+    expect(documentPresentation(element)).toMatchObject({
+      formats: [
+        {
+          range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 2 },
+          bold: true,
+        },
+      ],
+      alignments: [
+        {
+          range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 2 },
+          vertical: 'top',
+        },
+      ],
+    });
   });
 
   it('tracks a valid view override without mutating or persisting it', () => {

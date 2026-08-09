@@ -1,16 +1,42 @@
 import type { SheetCellRange } from './presentation';
 
 const A1_RANGE = /^([A-Z]+)([1-9][0-9]*):([A-Z]+)([1-9][0-9]*)$/u;
+const A1_CELL = /^([A-Z]+)([1-9][0-9]*)$/u;
 
 export function parseA1Range(value: string): SheetCellRange | null {
   if (typeof value !== 'string') return null;
   const match = A1_RANGE.exec(value);
   if (!match) return null;
 
-  const startColumnNumber = parseColumnNumber(match[1]);
-  const endColumnNumber = parseColumnNumber(match[3]);
-  const startRowNumber = Number(match[2]);
-  const endRowNumber = Number(match[4]);
+  const range = rangeFromMatch(match[1], match[2], match[3], match[4]);
+  if (range === null) return null;
+  return rangeArea(range) >= 2 ? range : null;
+}
+
+export function parseA1CellRange(value: string): SheetCellRange | null {
+  if (typeof value !== 'string') return null;
+  const cellMatch = A1_CELL.exec(value);
+  if (cellMatch) {
+    return rangeFromMatch(cellMatch[1], cellMatch[2], cellMatch[1], cellMatch[2]);
+  }
+  const rangeMatch = A1_RANGE.exec(value);
+  if (!rangeMatch) return null;
+  const range = rangeFromMatch(rangeMatch[1], rangeMatch[2], rangeMatch[3], rangeMatch[4]);
+  if (range === null || rangeArea(range) === 1) return null;
+  return range;
+}
+
+function rangeFromMatch(
+  startColumnLabel: string,
+  startRowLabel: string,
+  endColumnLabel: string,
+  endRowLabel: string
+): SheetCellRange | null {
+  const startColumnNumber = parseColumnNumber(startColumnLabel);
+  const endColumnNumber = parseColumnNumber(endColumnLabel);
+  const startRowNumber = Number(startRowLabel);
+  const endRowNumber = Number(endRowLabel);
+
   if (
     startColumnNumber === null ||
     endColumnNumber === null ||
@@ -27,14 +53,27 @@ export function parseA1Range(value: string): SheetCellRange | null {
     startColumn: startColumnNumber - 1,
     endColumn: endColumnNumber,
   };
-  const area = (range.endRow - range.startRow) * (range.endColumn - range.startColumn);
-  return area >= 2 ? range : null;
+  return range;
 }
 
 export function formatA1Range(range: SheetCellRange): string {
-  if (!isValidRuntimeRange(range)) {
+  if (!isValidRuntimeRange(range) || rangeArea(range) < 2) {
     throw new RangeError('A sheet range must use valid half-open coordinates covering two cells.');
   }
+  return formatRange(range);
+}
+
+export function formatA1CellRange(range: SheetCellRange): string {
+  if (!isValidRuntimeRange(range)) {
+    throw new RangeError('A sheet cell range must use valid non-empty half-open coordinates.');
+  }
+  if (rangeArea(range) === 1) {
+    return `${formatColumn(range.startColumn)}${range.startRow + 1}`;
+  }
+  return formatRange(range);
+}
+
+function formatRange(range: SheetCellRange): string {
   return `${formatColumn(range.startColumn)}${range.startRow + 1}:${formatColumn(range.endColumn - 1)}${range.endRow}`;
 }
 
@@ -66,5 +105,9 @@ function isValidRuntimeRange(range: SheetCellRange): boolean {
   }
   const rowSpan = range.endRow - range.startRow;
   const columnSpan = range.endColumn - range.startColumn;
-  return rowSpan > 0 && columnSpan > 0 && rowSpan * columnSpan >= 2;
+  return rowSpan > 0 && columnSpan > 0;
+}
+
+function rangeArea(range: SheetCellRange): number {
+  return (range.endRow - range.startRow) * (range.endColumn - range.startColumn);
 }

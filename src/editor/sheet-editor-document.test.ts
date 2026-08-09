@@ -298,7 +298,7 @@ describe('sheet-editor document source adapter', () => {
       'true'
     );
     expect(element.shadowRoot?.querySelector('.sheet-surface__notice')?.textContent).toContain(
-      'showing unmerged cells'
+      'showing default presentation'
     );
     activeCell(element).dispatchEvent(key('Enter'));
     expect(element.shadowRoot?.querySelector('textarea')).toBeNull();

@@ -164,6 +164,113 @@ describe('sheet-grid', () => {
     expect(element.shadowRoot?.querySelectorAll('col')).toHaveLength(3);
   });
 
+  it('renders validated emphasis and physical alignment on data and promoted-header cells', () => {
+    const element = create();
+    element.setData(
+      [
+        ['<safe>', 'Header B'],
+        ['One', 'Two'],
+      ],
+      {
+        headerRow: true,
+        presentation: {
+          formats: [
+            {
+              range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 1 },
+              bold: true,
+              italic: true,
+              strikethrough: true,
+            },
+          ],
+          alignments: [
+            {
+              range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+              horizontal: 'center',
+              vertical: 'top',
+            },
+            {
+              range: { startRow: 1, endRow: 2, startColumn: 0, endColumn: 1 },
+              horizontal: 'right',
+              vertical: 'bottom',
+            },
+          ],
+        },
+      }
+    );
+    document.body.append(element);
+
+    const header = element.shadowRoot?.querySelector<HTMLTableCellElement>(
+      'th[data-row="0"][data-column="0"]'
+    );
+    const data = element.shadowRoot?.querySelector<HTMLTableCellElement>(
+      'td[data-row="1"][data-column="0"]'
+    );
+    expect(header?.classList.contains('sheet-table__cell--bold')).toBe(true);
+    expect(header?.classList.contains('sheet-table__cell--italic')).toBe(true);
+    expect(header?.classList.contains('sheet-table__cell--strikethrough')).toBe(true);
+    expect(header?.classList.contains('sheet-table__cell--align-center')).toBe(true);
+    expect(header?.classList.contains('sheet-table__cell--align-top')).toBe(true);
+    expect(data?.classList.contains('sheet-table__cell--align-right')).toBe(true);
+    expect(data?.classList.contains('sheet-table__cell--align-bottom')).toBe(true);
+    expect(header?.textContent).toBe('<safe>');
+    expect(element.shadowRoot?.querySelector('safe')).toBeNull();
+  });
+
+  it('uses the merged anchor style and keeps covered-coordinate styles latent', () => {
+    const element = create();
+    const rows = [['Anchor', '']];
+    element.setData(rows, {
+      presentation: {
+        merges: [{ startRow: 0, endRow: 1, startColumn: 0, endColumn: 2 }],
+        formats: [
+          {
+            range: { startRow: 0, endRow: 1, startColumn: 1, endColumn: 2 },
+            italic: true,
+          },
+        ],
+        alignments: [
+          {
+            range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+            horizontal: 'center',
+          },
+        ],
+      },
+    });
+    document.body.append(element);
+
+    const anchor = element.shadowRoot?.querySelector<HTMLTableCellElement>('td');
+    expect(anchor?.classList.contains('sheet-table__cell--align-center')).toBe(true);
+    expect(anchor?.classList.contains('sheet-table__cell--italic')).toBe(false);
+  });
+
+  it('falls back atomically when any style section is invalid', () => {
+    const report = vi.fn();
+    setErrorHandler(report);
+    const element = create();
+    element.setData([['Anchor', '']], {
+      presentation: {
+        merges: [{ startRow: 0, endRow: 1, startColumn: 0, endColumn: 2 }],
+        formats: [
+          {
+            range: { startRow: 0, endRow: 1, startColumn: 2, endColumn: 3 },
+            bold: true,
+          },
+        ],
+      },
+    });
+    document.body.append(element);
+
+    expect(element.shadowRoot?.querySelectorAll('td')).toHaveLength(2);
+    expect(element.shadowRoot?.querySelector('.sheet-table__cell--bold')).toBeNull();
+    expect(element.shadowRoot?.querySelector('[role="status"]')?.textContent).toBe(
+      'Sheet presentation is invalid; showing default presentation.'
+    );
+    expect(report).toHaveBeenCalledWith(
+      'Sheet presentation is invalid.',
+      expect.arrayContaining([expect.objectContaining({ code: 'out_of_bounds' })])
+    );
+  });
+
   it('falls back atomically, reports once, and composes accessible notices', () => {
     const report = vi.fn();
     setErrorHandler(report);
@@ -248,6 +355,37 @@ describe('sheet-grid', () => {
 
     element.setContent('plain,again');
     expect(element.shadowRoot?.querySelectorAll('td')).toHaveLength(2);
+  });
+
+  it('resolves document format and alignment overrides by section', () => {
+    const parsed = parseSheetDocument(
+      [
+        '---',
+        'sheet: stillpoint/v1',
+        'presentation:',
+        '  formats:',
+        '    - range: A1',
+        '      bold: true',
+        '  alignments:',
+        '    - range: A1',
+        '      horizontal: center',
+        '---',
+        'value',
+      ].join('\n')
+    );
+    if (!parsed.ok) throw new Error('expected document parse to succeed');
+    const element = create();
+    document.body.append(element);
+
+    element.setDocument(parsed.document, { presentation: { formats: [] } });
+    let cell = element.shadowRoot?.querySelector<HTMLTableCellElement>('td');
+    expect(cell?.classList.contains('sheet-table__cell--bold')).toBe(false);
+    expect(cell?.classList.contains('sheet-table__cell--align-center')).toBe(true);
+
+    element.setDocument(parsed.document, { presentation: { alignments: [] } });
+    cell = element.shadowRoot?.querySelector<HTMLTableCellElement>('td');
+    expect(cell?.classList.contains('sheet-table__cell--bold')).toBe(true);
+    expect(cell?.classList.contains('sheet-table__cell--align-left')).toBe(true);
   });
 
   it('snapshots parsed document data and presentation before rendering', () => {

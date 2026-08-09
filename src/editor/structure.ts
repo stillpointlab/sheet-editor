@@ -34,18 +34,42 @@ export function transformSheetPresentation(
 ): SheetPresentation {
   assertOperation(operation);
   const presentation = snapshotSheetPresentation(source);
-  if (!presentation.merges) return presentation;
-
-  const merges: SheetCellRange[] = [];
-  for (const sourceRange of presentation.merges) {
-    const range = { ...sourceRange };
-    transformRangeAxis(range, operation);
-    const rowSpan = range.endRow - range.startRow;
-    const columnSpan = range.endColumn - range.startColumn;
-    if (rowSpan <= 0 || columnSpan <= 0 || (rowSpan === 1 && columnSpan === 1)) continue;
-    merges.push(range);
+  if (presentation.merges) {
+    presentation.merges = transformRules(
+      presentation.merges,
+      operation,
+      (range) =>
+        nonEmptyRange(range) &&
+        (range.endRow - range.startRow > 1 || range.endColumn - range.startColumn > 1)
+    );
   }
-  return { ...presentation, merges };
+  if (presentation.formats) {
+    presentation.formats = transformRules(presentation.formats, operation, nonEmptyRange);
+  }
+  if (presentation.alignments) {
+    presentation.alignments = transformRules(presentation.alignments, operation, nonEmptyRange);
+  }
+  return presentation;
+}
+
+function transformRules<T extends { range?: SheetCellRange } | SheetCellRange>(
+  rules: readonly T[],
+  operation: SheetStructureOperation,
+  keep: (range: SheetCellRange) => boolean
+): T[] {
+  const transformed: T[] = [];
+  for (const sourceRule of rules) {
+    const sourceRange = 'range' in sourceRule && sourceRule.range ? sourceRule.range : sourceRule;
+    const range = { ...sourceRange } as SheetCellRange;
+    transformRangeAxis(range, operation);
+    if (!keep(range)) continue;
+    transformed.push(('range' in sourceRule ? { ...sourceRule, range } : range) as T);
+  }
+  return transformed;
+}
+
+function nonEmptyRange(range: SheetCellRange): boolean {
+  return range.endRow > range.startRow && range.endColumn > range.startColumn;
 }
 
 function insertRow(sourceRows: readonly (readonly string[])[], requestedIndex: number): string[][] {

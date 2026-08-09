@@ -7,6 +7,11 @@ import {
 
 import { columnLabel } from './column-label';
 import { createSheetMergeIndex, type SheetMergeIndex } from './merge-index';
+import {
+  createSheetStyleIndex,
+  type EffectiveSheetCellStyle,
+  type SheetStyleIndex,
+} from './style-index';
 import { tableStyles } from './table.styles';
 
 import type { CsvParseResult } from '../csv';
@@ -42,9 +47,10 @@ export function renderTable(
     maxColumns: model.maxColumns,
     headerRow: options.headerRow,
   });
-  const merges = validation.ok ? validation.presentation.merges : [];
+  const presentation = validation.ok ? validation.presentation : { merges: [] };
+  const merges = presentation.merges;
   if (!validation.ok) {
-    reportError('Merged-cell presentation is invalid.', validation.issues);
+    reportError('Sheet presentation is invalid.', validation.issues);
   }
 
   if (model.totalRows === 0 || model.maxColumns === 0) {
@@ -55,6 +61,7 @@ export function renderTable(
   }
 
   const mergeIndex = createSheetMergeIndex(merges);
+  const styleIndex = createSheetStyleIndex(presentation);
   const scroll = document.createElement('div');
   scroll.className = 'sheet-surface__scroll';
   scroll.tabIndex = 0;
@@ -69,7 +76,7 @@ export function renderTable(
   if (options.addressed) {
     table.append(createAddressedHead(model.maxColumns));
   } else if (options.headerRow && model.rows.length > 0) {
-    table.append(createGridHead(model.rows[0], model.maxColumns, mergeIndex));
+    table.append(createGridHead(model.rows[0], model.maxColumns, mergeIndex, styleIndex));
   }
 
   const body = document.createElement('tbody');
@@ -87,7 +94,17 @@ export function renderTable(
     for (let columnIndex = 0; columnIndex < model.maxColumns; columnIndex += 1) {
       if (mergeIndex.isCovered(rowIndex, columnIndex)) continue;
       const range = mergeIndex.anchorAt(rowIndex, columnIndex);
-      row.append(createCell('td', cells[columnIndex] ?? '', rowIndex, columnIndex, range));
+      row.append(
+        createCell(
+          'td',
+          cells[columnIndex] ?? '',
+          rowIndex,
+          columnIndex,
+          range,
+          false,
+          styleIndex.styleAt(rowIndex, columnIndex)
+        )
+      );
     }
     body.append(row);
   }
@@ -175,14 +192,25 @@ export function createAddressedHead(columnCount: number): HTMLTableSectionElemen
 function createGridHead(
   cells: readonly string[],
   columnCount: number,
-  mergeIndex: SheetMergeIndex
+  mergeIndex: SheetMergeIndex,
+  styleIndex: SheetStyleIndex
 ): HTMLTableSectionElement {
   const head = document.createElement('thead');
   const row = document.createElement('tr');
   for (let columnIndex = 0; columnIndex < columnCount; columnIndex += 1) {
     if (mergeIndex.isCovered(0, columnIndex)) continue;
     const range = mergeIndex.anchorAt(0, columnIndex);
-    row.append(createCell('th', cells[columnIndex] ?? '', 0, columnIndex, range, true));
+    row.append(
+      createCell(
+        'th',
+        cells[columnIndex] ?? '',
+        0,
+        columnIndex,
+        range,
+        true,
+        styleIndex.styleAt(0, columnIndex)
+      )
+    );
   }
   head.append(row);
   return head;
@@ -194,7 +222,8 @@ export function createCell(
   rowIndex: number,
   columnIndex: number,
   range?: SheetCellRange,
-  columnHeader = false
+  columnHeader = false,
+  cellStyle?: EffectiveSheetCellStyle
 ): HTMLTableCellElement {
   const cell = document.createElement(tag);
   cell.dataset.row = String(rowIndex);
@@ -208,6 +237,7 @@ export function createCell(
   if (columnHeader) {
     cell.scope = range && range.endColumn - range.startColumn > 1 ? 'colgroup' : 'col';
   }
+  if (cellStyle) applyCellStyle(cell, cellStyle);
   const content = document.createElement('span');
   content.className = 'sheet-table__cell-content';
   content.textContent = value;
@@ -226,8 +256,16 @@ export function createTruncationNotice(
 
 export function createInvalidPresentationNotice(): HTMLParagraphElement {
   const notice = createStatusNotice('sheet-presentation-notice');
-  notice.textContent = 'Merged-cell presentation is invalid; showing unmerged cells.';
+  notice.textContent = 'Sheet presentation is invalid; showing default presentation.';
   return notice;
+}
+
+function applyCellStyle(cell: HTMLTableCellElement, style: EffectiveSheetCellStyle): void {
+  cell.classList.toggle('sheet-table__cell--bold', style.bold);
+  cell.classList.toggle('sheet-table__cell--italic', style.italic);
+  cell.classList.toggle('sheet-table__cell--strikethrough', style.strikethrough);
+  cell.classList.add(`sheet-table__cell--align-${style.horizontal}`);
+  cell.classList.add(`sheet-table__cell--align-${style.vertical}`);
 }
 
 function createStatusNotice(id: string): HTMLParagraphElement {

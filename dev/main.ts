@@ -16,6 +16,16 @@ const regular = [
   'Tea,"A ""quoted"" note"',
 ].join('\r\n');
 
+const overLimitFormatDocument = [
+  '---',
+  'sheet: stillpoint/v1',
+  'presentation:',
+  '  formats:',
+  ...Array.from({ length: 4097 }, () => ['    - range: A1', '      bold: true']).flat(),
+  '---',
+  'Over limit',
+].join('\n');
+
 interface Fixture {
   source: string;
   presentation?: SheetPresentation;
@@ -89,6 +99,97 @@ const fixtures: Record<string, Fixture> = {
     documentSource:
       '---\nsheet: stillpoint/v1\npresentation:\n  merges:\n    - range: A2:B2\n---\nHeader A,Header B\nVisible,Would be hidden',
   },
+  'document-formatting': {
+    source: '',
+    documentSource: [
+      '---',
+      'sheet: stillpoint/v1',
+      'presentation:',
+      '  formats:',
+      '    - range: A1:C3',
+      '      bold: true',
+      '      italic: true',
+      '    - range: B1:B3',
+      '      bold: false',
+      '      strikethrough: true',
+      '  alignments:',
+      '    - range: A1:C3',
+      '      horizontal: center',
+      '    - range: C1:C3',
+      '      horizontal: right',
+      '---',
+      'Bold italic,Italic strike,Right',
+      'Select across,Mixed states,Right',
+      'All emphasis,Except bold,Right',
+    ].join('\n'),
+  },
+  'document-alignments': {
+    source: '',
+    documentSource: [
+      '---',
+      'sheet: stillpoint/v1',
+      'presentation:',
+      '  alignments:',
+      '    - range: A1',
+      '      horizontal: left',
+      '      vertical: top',
+      '    - range: B1',
+      '      horizontal: center',
+      '      vertical: middle',
+      '    - range: C1',
+      '      horizontal: right',
+      '      vertical: bottom',
+      '---',
+      'Left top,Center middle,Right bottom',
+    ].join('\n'),
+  },
+  'document-merged-alignment': {
+    source: '',
+    documentSource: [
+      '---',
+      'sheet: stillpoint/v1',
+      'presentation:',
+      '  merges:',
+      '    - range: A1:C2',
+      '  formats:',
+      '    - range: A1:C2',
+      '      bold: true',
+      '  alignments:',
+      '    - range: A1:C2',
+      '      horizontal: center',
+      '      vertical: bottom',
+      '---',
+      'Merged heading,,',
+      ',,',
+      'One,Two,Three',
+    ].join('\n'),
+  },
+  'document-ragged-format': {
+    source: '',
+    documentSource: [
+      '---',
+      'sheet: stillpoint/v1',
+      'presentation:',
+      '  formats:',
+      '    - range: A1:C1',
+      '      italic: true',
+      '  alignments:',
+      '    - range: B1:C1',
+      '      horizontal: right',
+      '---',
+      'Only stored A',
+      'Wide,row,establishes bounds',
+    ].join('\n'),
+  },
+  'document-malformed-format': {
+    source: '',
+    documentSource:
+      '---\nsheet: stillpoint/v1\npresentation:\n  formats:\n    - range: A1\n      bold: yes\n---\nMalformed',
+  },
+  'document-over-limit-format': {
+    source: '',
+    documentSource: overLimitFormatDocument,
+  },
 };
 
 const preview = document.querySelector('#preview') as SheetPreview;
@@ -103,7 +204,15 @@ function render(): void {
   const selected = fixtures[fixture.value] ?? fixtures.regular;
   if (selected.documentSource !== undefined) {
     const parsed = parseSheetDocument(selected.documentSource);
-    if (!parsed.ok) throw new Error(parsed.error.message);
+    if (!parsed.ok) {
+      preview.setContent('');
+      grid.setContent('');
+      editor.setDocumentSource(selected.documentSource, {
+        presentation: selected.documentOverride,
+      });
+      editorContent.textContent = editor.getContent();
+      return;
+    }
     preview.setDocument(parsed.document, { presentation: selected.documentOverride });
     grid.setDocument(parsed.document, { presentation: selected.documentOverride });
     editor.setDocumentSource(selected.documentSource, {
