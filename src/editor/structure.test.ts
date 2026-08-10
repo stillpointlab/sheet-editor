@@ -229,7 +229,7 @@ describe('sheet structure merge transformations', () => {
     expect(transformSheetPresentation({}, { axis: 'row', kind: 'insert', index: 0 })).toEqual({});
   });
 
-  it('transforms format and alignment ranges with merge boundary semantics', () => {
+  it('transforms style and value-format ranges with merge boundary semantics', () => {
     const presentation = {
       formats: [
         {
@@ -242,6 +242,14 @@ describe('sheet structure merge transformations', () => {
           range: { startRow: 1, endRow: 3, startColumn: 1, endColumn: 4 },
           horizontal: 'center' as const,
           vertical: 'bottom' as const,
+        },
+      ],
+      valueFormats: [
+        {
+          range: { startRow: 1, endRow: 3, startColumn: 1, endColumn: 4 },
+          kind: 'currency' as const,
+          currency: 'USD',
+          decimalPlaces: 2,
         },
       ],
     };
@@ -262,10 +270,22 @@ describe('sheet structure merge transformations', () => {
           vertical: 'bottom',
         },
       ],
+      valueFormats: [
+        {
+          range: { startRow: 1, endRow: 4, startColumn: 1, endColumn: 4 },
+          kind: 'currency',
+          currency: 'USD',
+          decimalPlaces: 2,
+        },
+      ],
     });
     expect(
       transformSheetPresentation(presentation, { axis: 'column', kind: 'insert', index: 1 })
         .formats?.[0]?.range
+    ).toEqual({ startRow: 1, endRow: 3, startColumn: 2, endColumn: 5 });
+    expect(
+      transformSheetPresentation(presentation, { axis: 'column', kind: 'insert', index: 1 })
+        .valueFormats?.[0]?.range
     ).toEqual({ startRow: 1, endRow: 3, startColumn: 2, endColumn: 5 });
     expect(presentation.formats[0]?.range).toEqual({
       startRow: 1,

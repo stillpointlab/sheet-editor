@@ -15,8 +15,10 @@ import {
 } from '../presentation/a1-range';
 import {
   MAX_SHEET_ALIGNMENT_RULES,
+  MAX_SHEET_DECIMAL_PLACES,
   MAX_SHEET_FORMAT_RULES,
   MAX_SHEET_MERGES,
+  MAX_SHEET_VALUE_FORMAT_RULES,
   validateSheetPresentation,
   type SheetAlignmentRule,
   type SheetCellRange,
@@ -24,6 +26,8 @@ import {
   type SheetHorizontalAlignment,
   type SheetPresentation,
   type SheetVerticalAlignment,
+  type SheetValueFormatKind,
+  type SheetValueFormatRule,
 } from '../presentation/presentation';
 
 type CsvParseSuccess = Extract<CsvParseResult, { ok: true }>;
@@ -36,6 +40,7 @@ export interface ParsedSheetDocument {
     merges: SheetCellRange[];
     formats?: SheetFormatRule[];
     alignments?: SheetAlignmentRule[];
+    valueFormats?: SheetValueFormatRule[];
   };
 }
 
@@ -45,6 +50,7 @@ export type SheetDocumentErrorCode =
   | 'too_many_merges'
   | 'too_many_formats'
   | 'too_many_alignments'
+  | 'too_many_value_formats'
   | 'invalid_frontmatter'
   | 'unsupported_version'
   | 'unsupported_format'
@@ -65,6 +71,7 @@ export interface ParseSheetDocumentOptions {
   maxMerges?: number;
   maxFormats?: number;
   maxAlignments?: number;
+  maxValueFormats?: number;
   csvLimits?: Partial<CsvLimits>;
 }
 
@@ -81,12 +88,23 @@ export interface SerializeSheetDocumentOptions {
 const SHEET_VERSION = 'stillpoint/v1';
 const DEFAULT_MAX_FRONTMATTER_BYTES = 64 * 1024;
 const ROOT_KEYS = new Set(['sheet', 'format', 'presentation']);
-const PRESENTATION_KEYS = new Set(['merges', 'formats', 'alignments']);
+const PRESENTATION_KEYS = new Set(['merges', 'formats', 'alignments', 'valueFormats']);
 const MERGE_KEYS = new Set(['range']);
 const FORMAT_KEYS = new Set(['range', 'bold', 'italic', 'strikethrough']);
 const ALIGNMENT_KEYS = new Set(['range', 'horizontal', 'vertical']);
+const VALUE_FORMAT_KEYS = new Set(['range', 'kind', 'currency', 'decimalPlaces']);
 const HORIZONTAL_ALIGNMENTS = new Set<SheetHorizontalAlignment>(['left', 'center', 'right']);
 const VERTICAL_ALIGNMENTS = new Set<SheetVerticalAlignment>(['top', 'middle', 'bottom']);
+const VALUE_FORMAT_KINDS = new Set<SheetValueFormatKind>([
+  'automatic',
+  'number',
+  'currency',
+  'percent',
+  'date',
+  'time',
+  'datetime',
+]);
+const CURRENCY_DESIGNATOR = /^[A-Z]{3}$/;
 const STANDARD_TAGS = new Set([
   'tag:yaml.org,2002:map',
   'tag:yaml.org,2002:seq',
@@ -138,7 +156,8 @@ export function parseSheetDocument(
     root.presentation,
     limits.maxMerges,
     limits.maxFormats,
-    limits.maxAlignments
+    limits.maxAlignments,
+    limits.maxValueFormats
   );
   if (!presentation.ok) return presentation.result;
 
@@ -189,8 +208,9 @@ export function serializeSheetDocument(
   const merges = [...validation.presentation.merges].sort(compareRanges);
   const formats = validation.presentation.formats ?? [];
   const alignments = validation.presentation.alignments ?? [];
+  const valueFormats = validation.presentation.valueFormats ?? [];
   const envelope = ['---', `sheet: ${SHEET_VERSION}`, 'format: csv'];
-  if (merges.length > 0 || formats.length > 0 || alignments.length > 0) {
+  if (merges.length > 0 || formats.length > 0 || alignments.length > 0 || valueFormats.length > 0) {
     envelope.push('presentation:');
   }
   if (merges.length > 0) {
@@ -216,6 +236,17 @@ export function serializeSheetDocument(
       if (rule.vertical !== undefined) envelope.push(`      vertical: ${rule.vertical}`);
     }
   }
+  if (valueFormats.length > 0) {
+    envelope.push('  valueFormats:');
+    for (const rule of valueFormats) {
+      envelope.push(`    - range: ${formatA1CellRange(rule.range)}`);
+      envelope.push(`      kind: ${rule.kind}`);
+      if (rule.kind === 'currency') envelope.push(`      currency: ${rule.currency}`);
+      if (rule.kind === 'number' || rule.kind === 'currency' || rule.kind === 'percent') {
+        envelope.push(`      decimalPlaces: ${rule.decimalPlaces}`);
+      }
+    }
+  }
   envelope.push('---');
 
   const frontmatter = `${envelope.slice(1, -1).join(lineEnding)}${lineEnding}`;
@@ -232,6 +263,7 @@ interface ResolvedParserLimits {
   maxMerges: number;
   maxFormats: number;
   maxAlignments: number;
+  maxValueFormats: number;
 }
 
 function resolveParserLimits(options: ParseSheetDocumentOptions): ResolvedParserLimits {
@@ -242,6 +274,7 @@ function resolveParserLimits(options: ParseSheetDocumentOptions): ResolvedParser
   const maxMerges = options.maxMerges ?? MAX_SHEET_MERGES;
   const maxFormats = options.maxFormats ?? MAX_SHEET_FORMAT_RULES;
   const maxAlignments = options.maxAlignments ?? MAX_SHEET_ALIGNMENT_RULES;
+  const maxValueFormats = options.maxValueFormats ?? MAX_SHEET_VALUE_FORMAT_RULES;
   if (!Number.isSafeInteger(maxFrontmatterBytes) || maxFrontmatterBytes <= 0) {
     throw new RangeError('maxFrontmatterBytes must be a positive safe integer.');
   }
@@ -258,7 +291,14 @@ function resolveParserLimits(options: ParseSheetDocumentOptions): ResolvedParser
   ) {
     throw new RangeError(`maxAlignments must be between 1 and ${MAX_SHEET_ALIGNMENT_RULES}.`);
   }
-  return { maxFrontmatterBytes, maxMerges, maxFormats, maxAlignments };
+  if (
+    !Number.isSafeInteger(maxValueFormats) ||
+    maxValueFormats <= 0 ||
+    maxValueFormats > MAX_SHEET_VALUE_FORMAT_RULES
+  ) {
+    throw new RangeError(`maxValueFormats must be between 1 and ${MAX_SHEET_VALUE_FORMAT_RULES}.`);
+  }
+  return { maxFrontmatterBytes, maxMerges, maxFormats, maxAlignments, maxValueFormats };
 }
 
 type EnvelopeResult =
@@ -373,6 +413,7 @@ type ParsedPresentation = {
   merges: SheetCellRange[];
   formats?: SheetFormatRule[];
   alignments?: SheetAlignmentRule[];
+  valueFormats?: SheetValueFormatRule[];
 };
 
 type PresentationResult =
@@ -382,7 +423,8 @@ function parsePresentation(
   value: unknown,
   maxMerges: number,
   maxFormats: number,
-  maxAlignments: number
+  maxAlignments: number,
+  maxValueFormats: number
 ): PresentationResult {
   if (value === undefined) return { ok: true, value: { merges: [] } };
   if (!isRecord(value)) {
@@ -407,10 +449,13 @@ function parsePresentation(
   if (!formatsResult.ok) return formatsResult;
   const alignmentsResult = parseAlignments(value.alignments, maxAlignments);
   if (!alignmentsResult.ok) return alignmentsResult;
+  const valueFormatsResult = parseValueFormats(value.valueFormats, maxValueFormats);
+  if (!valueFormatsResult.ok) return valueFormatsResult;
 
   const presentation: ParsedPresentation = { merges: mergesResult.value };
   if (formatsResult.value.length > 0) presentation.formats = formatsResult.value;
   if (alignmentsResult.value.length > 0) presentation.alignments = alignmentsResult.value;
+  if (valueFormatsResult.value.length > 0) presentation.valueFormats = valueFormatsResult.value;
   return { ok: true, value: presentation };
 }
 
@@ -563,9 +608,94 @@ function parseAlignments(value: unknown, maxAlignments: number): SectionResult<S
   return { ok: true, value: alignments };
 }
 
+function parseValueFormats(
+  value: unknown,
+  maxValueFormats: number
+): SectionResult<SheetValueFormatRule> {
+  if (value === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(value)) {
+    return {
+      ok: false,
+      result: failure(
+        'invalid_presentation',
+        'Sheet presentation valueFormats must be a sequence.'
+      ),
+    };
+  }
+  if (value.length > maxValueFormats) {
+    return {
+      ok: false,
+      result: failure(
+        'too_many_value_formats',
+        `Sheet presentation exceeds ${maxValueFormats} value format rules.`
+      ),
+    };
+  }
+
+  const valueFormats: SheetValueFormatRule[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || firstUnknownKey(entry, VALUE_FORMAT_KEYS) !== null) {
+      return {
+        ok: false,
+        result: failure(
+          'invalid_presentation',
+          'Every sheet value format must be a mapping containing only range, kind, currency, and decimalPlaces.'
+        ),
+      };
+    }
+    const range = parsePresentationCellRange(entry.range, 'value format');
+    if (!range.ok) return range;
+    const kind = entry.kind as SheetValueFormatKind;
+    const hasCurrency = Object.hasOwn(entry, 'currency');
+    const hasDecimalPlaces = Object.hasOwn(entry, 'decimalPlaces');
+    const validDecimalPlaces =
+      Number.isInteger(entry.decimalPlaces) &&
+      (entry.decimalPlaces as number) >= 0 &&
+      (entry.decimalPlaces as number) <= MAX_SHEET_DECIMAL_PLACES;
+    const validCurrency =
+      typeof entry.currency === 'string' && CURRENCY_DESIGNATOR.test(entry.currency);
+
+    let rule: SheetValueFormatRule | null = null;
+    if (!VALUE_FORMAT_KINDS.has(kind)) {
+      rule = null;
+    } else if (kind === 'number' || kind === 'percent') {
+      if (hasDecimalPlaces && validDecimalPlaces && !hasCurrency) {
+        rule = {
+          range: range.value,
+          kind,
+          decimalPlaces: entry.decimalPlaces as number,
+        };
+      }
+    } else if (kind === 'currency') {
+      if (hasDecimalPlaces && validDecimalPlaces && hasCurrency && validCurrency) {
+        rule = {
+          range: range.value,
+          kind,
+          currency: entry.currency as string,
+          decimalPlaces: entry.decimalPlaces as number,
+        };
+      }
+    } else if (!hasCurrency && !hasDecimalPlaces) {
+      rule = { range: range.value, kind };
+    }
+
+    if (rule === null) {
+      return {
+        ok: false,
+        result: failure(
+          'invalid_presentation',
+          'Every sheet value format must match a supported kind and property combination.'
+        ),
+      };
+    }
+    valueFormats.push(rule);
+  }
+  return { ok: true, value: valueFormats };
+}
+
 function parsePresentationCellRange(
   value: unknown,
-  kind: 'format' | 'alignment'
+  kind: 'format' | 'alignment' | 'value format'
 ): { ok: true; value: SheetCellRange } | { ok: false; result: SheetDocumentParseResult } {
   if (typeof value !== 'string') {
     return {

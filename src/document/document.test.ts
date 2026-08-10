@@ -119,6 +119,52 @@ describe('parseSheetDocument', () => {
     });
   });
 
+  it('parses strict value-format unions without normalizing author overlap', () => {
+    const result = parseSheetDocument(
+      wrap(
+        [
+          'sheet: stillpoint/v1',
+          'presentation:',
+          '  valueFormats:',
+          '    - range: A1:B2',
+          '      kind: currency',
+          '      currency: USD',
+          '      decimalPlaces: 2',
+          '    - range: B2',
+          '      kind: automatic',
+          '    - range: C1',
+          '      kind: datetime',
+        ].join('\n'),
+        '1,2,3\n4,5,6'
+      )
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      document: {
+        presentation: {
+          merges: [],
+          valueFormats: [
+            {
+              range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 2 },
+              kind: 'currency',
+              currency: 'USD',
+              decimalPlaces: 2,
+            },
+            {
+              range: { startRow: 1, endRow: 2, startColumn: 1, endColumn: 2 },
+              kind: 'automatic',
+            },
+            {
+              range: { startRow: 0, endRow: 1, startColumn: 2, endColumn: 3 },
+              kind: 'datetime',
+            },
+          ],
+        },
+      },
+    });
+  });
+
   it('accepts LF and CRLF envelopes while leaving the CSV body to the codec', () => {
     const crlf = parseSheetDocument(
       wrap('sheet: stillpoint/v1\r\nformat: csv', '\uFEFF"a\r\nb",c\r\n1,2', '\r\n')
@@ -201,6 +247,22 @@ describe('parseSheetDocument', () => {
       'sheet: stillpoint/v1\npresentation:\n  alignments:\n    - range: A1\n      vertical: center',
       'invalid_presentation',
     ],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  valueFormats:\n    - range: A1\n      kind: number',
+      'invalid_presentation',
+    ],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  valueFormats:\n    - range: A1\n      kind: number\n      decimalPlaces: 11',
+      'invalid_presentation',
+    ],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  valueFormats:\n    - range: A1\n      kind: currency\n      currency: usd\n      decimalPlaces: 2',
+      'invalid_presentation',
+    ],
+    [
+      'sheet: stillpoint/v1\npresentation:\n  valueFormats:\n    - range: A1\n      kind: date\n      decimalPlaces: 2',
+      'invalid_presentation',
+    ],
   ])('returns a typed error for invalid frontmatter %#', (frontmatter, code) => {
     expect(parseSheetDocument(wrap(frontmatter))).toEqual(
       expect.objectContaining({ ok: false, error: expect.objectContaining({ code }) })
@@ -280,6 +342,9 @@ describe('parseSheetDocument', () => {
     expect(() => parseSheetDocument(wrap('sheet: stillpoint/v1'), { maxMerges: 0 })).toThrowError(
       RangeError
     );
+    expect(() =>
+      parseSheetDocument(wrap('sheet: stillpoint/v1'), { maxValueFormats: 0 })
+    ).toThrowError(RangeError);
     expect(() =>
       parseSheetDocument(wrap('sheet: stillpoint/v1'), { maxFrontmatterBytes: 0 })
     ).toThrowError(RangeError);
@@ -413,6 +478,91 @@ describe('serializeSheetDocument', () => {
         presentation: parsed.document.presentation,
       })
     ).toBe(source);
+  });
+
+  it('canonicalizes value-format overlap, cancellation, section order, and keys', () => {
+    const source = serializeSheetDocument({
+      rows: [
+        ['1', '2'],
+        ['3', '4'],
+      ],
+      presentation: {
+        alignments: [
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 2 },
+            horizontal: 'right',
+          },
+        ],
+        valueFormats: [
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 2 },
+            kind: 'currency',
+            currency: 'USD',
+            decimalPlaces: 2,
+          },
+          {
+            range: { startRow: 0, endRow: 1, startColumn: 1, endColumn: 2 },
+            kind: 'percent',
+            decimalPlaces: 1,
+          },
+          {
+            range: { startRow: 1, endRow: 2, startColumn: 1, endColumn: 2 },
+            kind: 'automatic',
+          },
+        ],
+      },
+    });
+
+    expect(source).toContain(
+      [
+        '  alignments:',
+        '    - range: A1:B2',
+        '      horizontal: right',
+        '  valueFormats:',
+        '    - range: A1:A2',
+        '      kind: currency',
+        '      currency: USD',
+        '      decimalPlaces: 2',
+        '    - range: B1',
+        '      kind: percent',
+        '      decimalPlaces: 1',
+      ].join('\n')
+    );
+    expect(source).not.toContain('kind: automatic');
+
+    const parsed = parseSheetDocument(source);
+    if (!parsed.ok) throw new Error('expected canonical source to parse');
+    expect(
+      serializeSheetDocument({
+        rows: parsed.document.data.rows,
+        presentation: parsed.document.presentation,
+      })
+    ).toBe(source);
+  });
+
+  it('enforces the raw parser value-format cap', () => {
+    expect(
+      parseSheetDocument(
+        wrap(
+          [
+            'sheet: stillpoint/v1',
+            'presentation:',
+            '  valueFormats:',
+            '    - range: A1',
+            '      kind: date',
+            '    - range: A1',
+            '      kind: time',
+          ].join('\n'),
+          '1'
+        ),
+        { maxValueFormats: 1 }
+      )
+    ).toEqual(
+      expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({ code: 'too_many_value_formats' }),
+      })
+    );
   });
 
   it('refuses canonical frontmatter larger than 64 KiB', () => {

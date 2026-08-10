@@ -211,7 +211,8 @@ function presentationsEqual(left: SheetPresentation, right: SheetPresentation): 
     return false;
   return (
     JSON.stringify(left.formats ?? []) === JSON.stringify(right.formats ?? []) &&
-    JSON.stringify(left.alignments ?? []) === JSON.stringify(right.alignments ?? [])
+    JSON.stringify(left.alignments ?? []) === JSON.stringify(right.alignments ?? []) &&
+    JSON.stringify(left.valueFormats ?? []) === JSON.stringify(right.valueFormats ?? [])
   );
 }
 

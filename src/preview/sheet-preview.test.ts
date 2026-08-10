@@ -133,4 +133,29 @@ describe('sheet-preview', () => {
     });
     expect(element.shadowRoot?.querySelector<HTMLTableCellElement>('tbody td')?.rowSpan).toBe(2);
   });
+
+  it('uses embedded and call-site value formats without changing document values', () => {
+    const parsed = parseSheetDocument(
+      [
+        '---',
+        'sheet: stillpoint/v1',
+        'presentation:',
+        '  valueFormats:',
+        '    - range: A1',
+        '      kind: datetime',
+        '---',
+        '2026-08-10T14:05:06',
+      ].join('\n')
+    );
+    if (!parsed.ok) throw new Error('expected document parse to succeed');
+    const element = create();
+    document.body.append(element);
+
+    element.setDocument(parsed.document);
+    expect(element.shadowRoot?.querySelector('tbody td')?.textContent).toBe('8/10/2026 2:05:06 PM');
+
+    element.setDocument(parsed.document, { presentation: { valueFormats: [] } });
+    expect(element.shadowRoot?.querySelector('tbody td')?.textContent).toBe('2026-08-10T14:05:06');
+    expect(parsed.document.data.rows).toEqual([['2026-08-10T14:05:06']]);
+  });
 });

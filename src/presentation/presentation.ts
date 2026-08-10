@@ -7,6 +7,8 @@ export interface SheetCellRange {
 
 export type SheetHorizontalAlignment = 'left' | 'center' | 'right';
 export type SheetVerticalAlignment = 'top' | 'middle' | 'bottom';
+export type SheetValueFormatKind =
+  'automatic' | 'number' | 'currency' | 'percent' | 'date' | 'time' | 'datetime';
 
 export interface SheetFormatRule {
   range: SheetCellRange;
@@ -21,10 +23,18 @@ export interface SheetAlignmentRule {
   vertical?: SheetVerticalAlignment;
 }
 
+export type SheetValueFormatRule =
+  | { range: SheetCellRange; kind: 'automatic' }
+  | { range: SheetCellRange; kind: 'number'; decimalPlaces: number }
+  | { range: SheetCellRange; kind: 'currency'; currency: string; decimalPlaces: number }
+  | { range: SheetCellRange; kind: 'percent'; decimalPlaces: number }
+  | { range: SheetCellRange; kind: 'date' | 'time' | 'datetime' };
+
 export interface SheetPresentation {
   merges?: readonly SheetCellRange[];
   formats?: readonly SheetFormatRule[];
   alignments?: readonly SheetAlignmentRule[];
+  valueFormats?: readonly SheetValueFormatRule[];
 }
 
 export interface SheetContentOptions {
@@ -41,16 +51,20 @@ export interface SheetPresentationValidationContext {
 export const MAX_SHEET_MERGES = 4096;
 export const MAX_SHEET_FORMAT_RULES = 4096;
 export const MAX_SHEET_ALIGNMENT_RULES = 4096;
+export const MAX_SHEET_VALUE_FORMAT_RULES = 4096;
+export const MAX_SHEET_DECIMAL_PLACES = 10;
 
 export type SheetPresentationIssueCode =
   | 'unknown_property'
   | 'too_many_merges'
   | 'too_many_formats'
   | 'too_many_alignments'
+  | 'too_many_value_formats'
   | 'invalid_coordinate'
   | 'invalid_range'
   | 'invalid_format'
   | 'invalid_alignment'
+  | 'invalid_value_format'
   | 'out_of_bounds'
   | 'truncated_range'
   | 'overlapping_merges'
@@ -64,24 +78,37 @@ export interface SheetPresentationIssue {
   conflictingMergeIndex?: number;
   formatIndex?: number;
   alignmentIndex?: number;
+  valueFormatIndex?: number;
 }
 
 export interface NormalizedSheetPresentation {
   merges: readonly SheetCellRange[];
   formats?: readonly SheetFormatRule[];
   alignments?: readonly SheetAlignmentRule[];
+  valueFormats?: readonly SheetValueFormatRule[];
 }
 
 export type SheetPresentationValidationResult =
   | { ok: true; presentation: NormalizedSheetPresentation }
   | { ok: false; issues: SheetPresentationIssue[] };
 
-const PRESENTATION_SECTIONS = ['merges', 'formats', 'alignments'] as const;
+const PRESENTATION_SECTIONS = ['merges', 'formats', 'alignments', 'valueFormats'] as const;
 const RANGE_KEYS = new Set(['startRow', 'endRow', 'startColumn', 'endColumn']);
 const FORMAT_KEYS = new Set(['range', 'bold', 'italic', 'strikethrough']);
 const ALIGNMENT_KEYS = new Set(['range', 'horizontal', 'vertical']);
+const VALUE_FORMAT_KEYS = new Set(['range', 'kind', 'currency', 'decimalPlaces']);
 const HORIZONTAL_ALIGNMENTS = new Set<SheetHorizontalAlignment>(['left', 'center', 'right']);
 const VERTICAL_ALIGNMENTS = new Set<SheetVerticalAlignment>(['top', 'middle', 'bottom']);
+const VALUE_FORMAT_KINDS = new Set<SheetValueFormatKind>([
+  'automatic',
+  'number',
+  'currency',
+  'percent',
+  'date',
+  'time',
+  'datetime',
+]);
+const CURRENCY_DESIGNATOR = /^[A-Z]{3}$/;
 
 export function validateSheetPresentation(
   presentation: SheetPresentation,
@@ -106,6 +133,7 @@ export function validateSheetPresentation(
   const merges = validateMerges(presentation.merges, context, issues);
   const formats = validateFormats(presentation.formats, context, issues);
   const alignments = validateAlignments(presentation.alignments, context, issues);
+  const valueFormats = validateValueFormats(presentation.valueFormats, context, issues);
   if (issues.length > 0) return { ok: false, issues };
 
   const normalizedFormats = normalizeFormats(formats, context.rows.length, context.maxColumns);
@@ -126,12 +154,26 @@ export function validateSheetPresentation(
       message: `Normalized sheet presentation exceeds ${MAX_SHEET_ALIGNMENT_RULES} alignment rules.`,
     });
   }
+  const normalizedValueFormats = normalizeValueFormats(
+    valueFormats,
+    context.rows.length,
+    context.maxColumns
+  );
+  if (normalizedValueFormats.length > MAX_SHEET_VALUE_FORMAT_RULES) {
+    issues.push({
+      code: 'too_many_value_formats',
+      message: `Normalized sheet presentation exceeds ${MAX_SHEET_VALUE_FORMAT_RULES} value format rules.`,
+    });
+  }
   if (issues.length > 0) return { ok: false, issues };
 
   const normalized: NormalizedSheetPresentation = {
     merges: freezeRanges(merges),
     ...(normalizedFormats.length > 0 ? { formats: freezeRules(normalizedFormats) } : {}),
     ...(normalizedAlignments.length > 0 ? { alignments: freezeRules(normalizedAlignments) } : {}),
+    ...(normalizedValueFormats.length > 0
+      ? { valueFormats: freezeRules(normalizedValueFormats) }
+      : {}),
   };
   return { ok: true, presentation: Object.freeze(normalized) };
 }
@@ -140,7 +182,7 @@ function freezeRanges(ranges: readonly SheetCellRange[]): readonly SheetCellRang
   return Object.freeze(ranges.map((range) => Object.freeze({ ...range })));
 }
 
-function freezeRules<T extends SheetFormatRule | SheetAlignmentRule>(
+function freezeRules<T extends SheetFormatRule | SheetAlignmentRule | SheetValueFormatRule>(
   rules: readonly T[]
 ): readonly T[] {
   return Object.freeze(
@@ -395,10 +437,108 @@ function validateAlignments(
   return alignments;
 }
 
+function validateValueFormats(
+  rawValueFormats: unknown,
+  context: SheetPresentationValidationContext,
+  issues: SheetPresentationIssue[]
+): SheetValueFormatRule[] {
+  if (rawValueFormats === undefined) return [];
+  if (!Array.isArray(rawValueFormats)) {
+    issues.push({
+      code: 'invalid_value_format',
+      message: 'Sheet presentation value formats must be an array.',
+    });
+    return [];
+  }
+  if (rawValueFormats.length > MAX_SHEET_VALUE_FORMAT_RULES) {
+    issues.push({
+      code: 'too_many_value_formats',
+      message: `Sheet presentation exceeds ${MAX_SHEET_VALUE_FORMAT_RULES} value format rules.`,
+    });
+    return [];
+  }
+
+  const valueFormats: SheetValueFormatRule[] = [];
+  for (let valueFormatIndex = 0; valueFormatIndex < rawValueFormats.length; valueFormatIndex += 1) {
+    const rawRule: unknown = rawValueFormats[valueFormatIndex];
+    if (!isRecord(rawRule)) {
+      issues.push({
+        code: 'invalid_value_format',
+        message: `Value format rule ${valueFormatIndex} must be an object.`,
+        valueFormatIndex,
+      });
+      continue;
+    }
+    for (const property of Object.keys(rawRule)) {
+      if (!VALUE_FORMAT_KEYS.has(property)) {
+        issues.push({
+          code: 'unknown_property',
+          message: `Value format rule ${valueFormatIndex} has unknown property: ${property}.`,
+          valueFormatIndex,
+        });
+      }
+    }
+    const range = readRuleRange(
+      rawRule.range,
+      issues,
+      { valueFormatIndex },
+      `Value format rule ${valueFormatIndex}`
+    );
+    const kind = rawRule.kind as SheetValueFormatKind;
+    const hasCurrency = Object.hasOwn(rawRule, 'currency');
+    const hasDecimalPlaces = Object.hasOwn(rawRule, 'decimalPlaces');
+    const decimalPlaces = rawRule.decimalPlaces;
+    const validDecimalPlaces =
+      Number.isInteger(decimalPlaces) &&
+      (decimalPlaces as number) >= 0 &&
+      (decimalPlaces as number) <= MAX_SHEET_DECIMAL_PLACES;
+    const validCurrency =
+      typeof rawRule.currency === 'string' && CURRENCY_DESIGNATOR.test(rawRule.currency);
+
+    let rule: SheetValueFormatRule | null = null;
+    if (!VALUE_FORMAT_KINDS.has(kind)) {
+      rule = null;
+    } else if (kind === 'number' || kind === 'percent') {
+      if (hasDecimalPlaces && validDecimalPlaces && !hasCurrency && range) {
+        rule = { range, kind, decimalPlaces: decimalPlaces as number };
+      }
+    } else if (kind === 'currency') {
+      if (hasDecimalPlaces && validDecimalPlaces && hasCurrency && validCurrency && range) {
+        rule = {
+          range,
+          kind,
+          currency: rawRule.currency as string,
+          decimalPlaces: decimalPlaces as number,
+        };
+      }
+    } else if (!hasCurrency && !hasDecimalPlaces && range) {
+      rule = { range, kind };
+    }
+
+    if (rule === null) {
+      issues.push({
+        code: 'invalid_value_format',
+        message: `Value format rule ${valueFormatIndex} must match a supported kind and property combination.`,
+        valueFormatIndex,
+      });
+      continue;
+    }
+    validateRangeBounds(
+      rule.range,
+      context,
+      issues,
+      { valueFormatIndex },
+      `Value format rule ${valueFormatIndex}`
+    );
+    valueFormats.push(rule);
+  }
+  return valueFormats;
+}
+
 function readRuleRange(
   value: unknown,
   issues: SheetPresentationIssue[],
-  location: Pick<SheetPresentationIssue, 'formatIndex' | 'alignmentIndex'>,
+  location: Pick<SheetPresentationIssue, 'formatIndex' | 'alignmentIndex' | 'valueFormatIndex'>,
   label: string
 ): SheetCellRange | null {
   if (!isRecord(value)) {
@@ -453,7 +593,10 @@ function validateRangeBounds(
   range: SheetCellRange,
   context: SheetPresentationValidationContext,
   issues: SheetPresentationIssue[],
-  location: Pick<SheetPresentationIssue, 'mergeIndex' | 'formatIndex' | 'alignmentIndex'>,
+  location: Pick<
+    SheetPresentationIssue,
+    'mergeIndex' | 'formatIndex' | 'alignmentIndex' | 'valueFormatIndex'
+  >,
   label: string
 ): void {
   if (range.endRow > context.totalRows || range.endColumn > context.maxColumns) {
@@ -536,6 +679,58 @@ function normalizeAlignments(
   });
 }
 
+function normalizeValueFormats(
+  rules: readonly SheetValueFormatRule[],
+  rowCount: number,
+  columnCount: number
+): SheetValueFormatRule[] {
+  if (rules.length === 0 || rowCount === 0 || columnCount === 0) return [];
+
+  const states = new Uint16Array(rowCount * columnCount);
+  const descriptors: SheetValueFormatRule[] = [];
+  const codes = new Map<string, number>();
+  for (const rule of rules) {
+    let code = 0;
+    if (rule.kind !== 'automatic') {
+      const key = valueFormatKey(rule);
+      code = codes.get(key) ?? 0;
+      if (code === 0) {
+        descriptors.push(rule);
+        code = descriptors.length;
+        codes.set(key, code);
+      }
+    }
+    paintResolvedProperty(states, columnCount, [{ range: rule.range, value: code }], () => code);
+  }
+
+  return rectanglesForStates(states, rowCount, columnCount).map(({ range, state }) => {
+    const descriptor = descriptors[state - 1];
+    if (!descriptor) throw new RangeError('Normalized value format state is invalid.');
+    if (descriptor.kind === 'currency') {
+      return {
+        range,
+        kind: descriptor.kind,
+        currency: descriptor.currency,
+        decimalPlaces: descriptor.decimalPlaces,
+      };
+    }
+    if (descriptor.kind === 'number' || descriptor.kind === 'percent') {
+      return { range, kind: descriptor.kind, decimalPlaces: descriptor.decimalPlaces };
+    }
+    return { range, kind: descriptor.kind };
+  });
+}
+
+function valueFormatKey(rule: SheetValueFormatRule): string {
+  if (rule.kind === 'currency') {
+    return `${rule.kind}:${rule.currency}:${rule.decimalPlaces}`;
+  }
+  if (rule.kind === 'number' || rule.kind === 'percent') {
+    return `${rule.kind}:${rule.decimalPlaces}`;
+  }
+  return rule.kind;
+}
+
 interface ResolvedProperty<T> {
   range: SheetCellRange;
   value: T;
@@ -572,7 +767,7 @@ function resolveProperty<R extends { range: SheetCellRange }, T>(
 }
 
 function paintResolvedProperty<T>(
-  states: Uint8Array,
+  states: Uint8Array | Uint16Array,
   columnCount: number,
   properties: readonly ResolvedProperty<T>[],
   paint: (state: number, value: T) => number
@@ -638,7 +833,7 @@ interface StateRectangle {
 }
 
 function rectanglesForStates(
-  states: Uint8Array,
+  states: Uint8Array | Uint16Array,
   rowCount: number,
   columnCount: number
 ): StateRectangle[] {

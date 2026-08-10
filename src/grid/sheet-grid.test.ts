@@ -216,6 +216,32 @@ describe('sheet-grid', () => {
     expect(element.shadowRoot?.querySelector('safe')).toBeNull();
   });
 
+  it('renders value formats consistently in promoted headers and data cells', () => {
+    const element = create();
+    element.setData([['1234.5'], ['0.125']], {
+      headerRow: true,
+      presentation: {
+        valueFormats: [
+          {
+            range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+            kind: 'currency',
+            currency: 'USD',
+            decimalPlaces: 2,
+          },
+          {
+            range: { startRow: 1, endRow: 2, startColumn: 0, endColumn: 1 },
+            kind: 'percent',
+            decimalPlaces: 1,
+          },
+        ],
+      },
+    });
+    document.body.append(element);
+
+    expect(element.shadowRoot?.querySelector('thead th')?.textContent).toBe('$1,234.50');
+    expect(element.shadowRoot?.querySelector('tbody td')?.textContent).toBe('12.5%');
+  });
+
   it('uses the merged anchor style and keeps covered-coordinate styles latent', () => {
     const element = create();
     const rows = [['Anchor', '']];
