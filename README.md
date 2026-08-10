@@ -8,7 +8,8 @@ editor surfaces.
 - `@stillpointlab/sheet-editor/csv` — isomorphic bounded CSV parser and serializer
 - `@stillpointlab/sheet-editor/grid` — registers `<sheet-grid>`, a gutterless data table
 - `@stillpointlab/sheet-editor/preview` — registers `<sheet-preview>`, an A1-style cells pane
-- `@stillpointlab/sheet-editor/presentation` — side-effect-free merge and cell-style validation
+- `@stillpointlab/sheet-editor/presentation` — side-effect-free merge, cell-style, and value-format
+  validation
 - `@stillpointlab/sheet-editor/document` — side-effect-free strict `.sheet` parsing and serialization
 - `@stillpointlab/sheet-editor/interaction` — side-effect-free selection and merged-cell geometry
 - `@stillpointlab/sheet-editor/editor` — registers `<sheet-editor>`, an interactive CSV and `.sheet`
@@ -67,6 +68,14 @@ grid.setData(
           vertical: 'bottom',
         },
       ],
+      valueFormats: [
+        {
+          range: { startRow: 1, endRow: 2, startColumn: 1, endColumn: 2 },
+          kind: 'currency',
+          currency: 'USD',
+          decimalPlaces: 2,
+        },
+      ],
     },
   }
 );
@@ -118,9 +127,9 @@ Grid copy and paste use synchronous browser clipboard events, so keyboard shortc
 commands, and spreadsheet applications share the same plain-text path. Copy emits the complete
 merge-expanded rectangle with covered and virtual coordinates blank. Paste accepts bounded,
 quoted tab/newline-delimited values at the selection's top-left; it does not tile a scalar across a
-larger selection or carry formats, alignments, or merges. Literal tabs, multiline values, quotes,
-leading zeroes, HTML-looking text, and formula-looking text round-trip without evaluation or
-coercion.
+larger selection or carry formats, value formats, alignments, or merges. Literal tabs, multiline
+values, quotes, leading zeroes, HTML-looking text, and formula-looking text round-trip without
+evaluation or coercion.
 
 Delete and Backspace clear only materialized values and retain ragged row lengths, explicit trailing
 fields, and document presentation. Paste and clear are each one undoable transaction and one
@@ -139,10 +148,18 @@ or after it, and deletes the active row or column. Insertions use the outside ed
 selection; deletion uses its active endpoint. A command collapses selection onto the inserted line
 or nearest surviving cell and returns focus to the grid.
 
-Explicit `.sheet` document sessions additionally show Bold, Italic, Strikethrough, and two compact
-alignment flyouts. The flyouts contain Left/Center/Right and Top/Middle/Bottom choices. They report
-homogeneous or mixed selection state, target the complete merge-expanded stored selection, and do
-not pad ragged rows. Plain `setContent()` CSV sessions never show or persist these controls.
+Explicit `.sheet` document sessions additionally show Bold, Italic, Strikethrough, two compact
+alignment flyouts, and five value-format controls. Currency and Percent apply the standard
+two-decimal preset, the decimal buttons adjust precision, and the Value format menu offers
+Automatic, Number, Currency, Percent, Date, Time, and Date time. The controls report homogeneous or
+mixed selection state, target the complete merge-expanded stored selection, and do not pad ragged
+rows. Plain `setContent()` CSV sessions never show or persist them.
+
+Value formatting changes presentation only. Navigation displays a fixed `en-US` rendering, while
+editing, copy/paste, serialization, undo, and download keep the exact raw cell string. Incompatible
+numeric or temporal text remains visibly raw. Automatic clears formatting and restores that raw
+display. A decimal adjustment on Automatic starts from the raw value's fractional precision (or
+zero for empty/incompatible text) and installs an explicit Number format.
 
 The trailing virtual row and column are not stored dimensions. Inserting from either side of a
 virtual edge appends one materialized line, while deleting a virtual line is disabled. Column
@@ -179,6 +196,11 @@ presentation:
     - range: A1:C1
       horizontal: center
       vertical: bottom
+  valueFormats:
+    - range: B2:C2
+      kind: currency
+      currency: USD
+      decimalPlaces: 2
 ---
 Quarter,Revenue,Cost
 Q1,1200,800
@@ -200,16 +222,24 @@ const editor = document.createElement('sheet-editor');
 editor.setDocumentSource(source);
 ```
 
-An optional call-site presentation resolves `merges`, `formats`, and `alignments` independently.
-Omitted or `undefined` sections inherit embedded presentation, `null` suppresses all presentation,
-an empty section clears only that section, and a supplied section replaces it. Call-site overrides
-remain view-only; an editor disables authoring for a format/alignment section masked by an override.
+An optional call-site presentation resolves `merges`, `formats`, `alignments`, and `valueFormats`
+independently. Omitted or `undefined` sections inherit embedded presentation, `null` suppresses all
+presentation, an empty section clears only that section, and a supplied section replaces it.
+Call-site overrides remain view-only; an editor disables authoring for a presentation section
+masked by an override.
 
 Format rules support `bold`, `italic`, and `strikethrough`; alignment rules support physical
 `left`/`center`/`right` and `top`/`middle`/`bottom`. A later overlapping rule wins only for the
 properties it supplies. Canonical serialization removes false/default-only state and writes stable,
 non-overlapping rectangles. Persisted style ranges use `A1` for a singleton or `A1:C3` for a
 rectangle, while merge ranges continue requiring at least two cells.
+
+Value-format rules use a complete `kind` descriptor. Number and Percent require `decimalPlaces`
+from 0 through 10; Currency also requires a three-letter uppercase designator. Date, Time, Date
+time, and Automatic carry no numeric options. Later rules replace the complete descriptor, and
+Automatic cancels earlier value formatting in its range. Temporal formats accept strict ISO-like
+civil values or spreadsheet serial days from December 30, 1899; rendering never applies a browser
+timezone.
 
 `getContent()` returns the exact original `.sheet` source until a value changes, including after
 cancel or undo-to-baseline. A real value edit returns one canonical document while retaining its

@@ -13,6 +13,11 @@ import {
   type SheetStyleIndex,
 } from './style-index';
 import { tableStyles } from './table.styles';
+import {
+  createSheetValueFormatIndex,
+  formatSheetCellValue,
+  type SheetValueFormatIndex,
+} from './value-format';
 
 import type { CsvParseResult } from '../csv';
 
@@ -62,6 +67,7 @@ export function renderTable(
 
   const mergeIndex = createSheetMergeIndex(merges);
   const styleIndex = createSheetStyleIndex(presentation);
+  const valueFormatIndex = createSheetValueFormatIndex(presentation);
   const scroll = document.createElement('div');
   scroll.className = 'sheet-surface__scroll';
   scroll.tabIndex = 0;
@@ -76,7 +82,9 @@ export function renderTable(
   if (options.addressed) {
     table.append(createAddressedHead(model.maxColumns));
   } else if (options.headerRow && model.rows.length > 0) {
-    table.append(createGridHead(model.rows[0], model.maxColumns, mergeIndex, styleIndex));
+    table.append(
+      createGridHead(model.rows[0], model.maxColumns, mergeIndex, styleIndex, valueFormatIndex)
+    );
   }
 
   const body = document.createElement('tbody');
@@ -97,7 +105,10 @@ export function renderTable(
       row.append(
         createCell(
           'td',
-          cells[columnIndex] ?? '',
+          formatSheetCellValue(
+            cells[columnIndex] ?? '',
+            valueFormatIndex.formatAt(rowIndex, columnIndex)
+          ),
           rowIndex,
           columnIndex,
           range,
@@ -193,7 +204,8 @@ function createGridHead(
   cells: readonly string[],
   columnCount: number,
   mergeIndex: SheetMergeIndex,
-  styleIndex: SheetStyleIndex
+  styleIndex: SheetStyleIndex,
+  valueFormatIndex: SheetValueFormatIndex
 ): HTMLTableSectionElement {
   const head = document.createElement('thead');
   const row = document.createElement('tr');
@@ -203,7 +215,7 @@ function createGridHead(
     row.append(
       createCell(
         'th',
-        cells[columnIndex] ?? '',
+        formatSheetCellValue(cells[columnIndex] ?? '', valueFormatIndex.formatAt(0, columnIndex)),
         0,
         columnIndex,
         range,

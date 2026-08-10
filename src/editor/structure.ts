@@ -49,6 +49,9 @@ export function transformSheetPresentation(
   if (presentation.alignments) {
     presentation.alignments = transformRules(presentation.alignments, operation, nonEmptyRange);
   }
+  if (presentation.valueFormats) {
+    presentation.valueFormats = transformRules(presentation.valueFormats, operation, nonEmptyRange);
+  }
   return presentation;
 }
 

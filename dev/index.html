@@ -95,6 +95,7 @@
           <option value="document-invalid">.sheet invalid contextual merge</option>
           <option value="document-formatting">.sheet overlapping/mixed formatting</option>
           <option value="document-alignments">.sheet all alignments</option>
+          <option value="document-value-formats">.sheet value formatting</option>
           <option value="document-merged-alignment">.sheet merged alignment</option>
           <option value="document-ragged-format">.sheet ragged formatted slots</option>
           <option value="document-malformed-format">.sheet malformed formatting</option>
@@ -111,17 +112,18 @@
         <h2>Interactive sheet selection</h2>
         <div class="pane"><sheet-editor id="editor"></sheet-editor></div>
         <p>
-          Document fixtures add emphasis and two alignment flyouts to the row/column tools.
-          Left/Right and Home/End move within the toolbar; Escape returns to the grid. Enter
-          quick-edits; F2/double-click caret-edits; Alt/Option+Enter inserts a line break. Escape
-          cancels, Enter/Shift+Enter commit and move, and Ctrl/Cmd+Z undoes in navigation. Grid
-          Ctrl/Cmd+C and Ctrl/Cmd+V copy and paste literal TSV; Delete or Backspace clears values.
+          Document fixtures add emphasis, alignment, Currency, Percent, decimal-place, and Value
+          format controls to the row/column tools. Left/Right and Home/End move within the toolbar;
+          Escape returns to the grid. Enter quick-edits; F2/double-click caret-edits;
+          Alt/Option+Enter inserts a line break. Escape cancels, Enter/Shift+Enter commit and move,
+          and Ctrl/Cmd+Z undoes in navigation. Grid Ctrl/Cmd+C and Ctrl/Cmd+V copy and paste literal
+          TSV; Delete or Backspace clears values.
         </p>
         <p>
-          Clipboard smoke test: use Clipboard literal values and Document merged alignment to copy
-          rectangular selections between CSV, `.sheet`, and an external spreadsheet. Check quoted
-          multiline cells, merge/style retention, undo, read-only copy, and both themes in Firefox,
-          Chromium, and Safari. The source block below should always show the complete current file.
+          Formatting smoke test: use Sheet value formatting to exercise all kinds, mixed selections,
+          decimal bounds, incompatible raw text, editing/copying raw values, undo, reload,
+          read-only, narrow panes, and both themes. The source block below should always show the
+          complete current file.
         </p>
         <pre><code id="editor-content"></code></pre>
       </section>

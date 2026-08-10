@@ -4,10 +4,12 @@ import {
   MAX_SHEET_ALIGNMENT_RULES,
   MAX_SHEET_FORMAT_RULES,
   MAX_SHEET_MERGES,
+  MAX_SHEET_VALUE_FORMAT_RULES,
   resolveSheetPresentation,
   validateSheetPresentation,
   type SheetCellRange,
   type SheetFormatRule,
+  type SheetValueFormatRule,
 } from './presentation';
 
 const rows = [
@@ -398,6 +400,182 @@ describe('validateSheetPresentation', () => {
       expect.objectContaining({
         ok: false,
         issues: expect.arrayContaining([expect.objectContaining({ code: 'too_many_formats' })]),
+      })
+    );
+  });
+
+  it('resolves complete value-format descriptors in source order and removes Automatic state', () => {
+    const result = validateSheetPresentation(
+      {
+        valueFormats: [
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 3 },
+            kind: 'currency',
+            currency: 'USD',
+            decimalPlaces: 2,
+          },
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 1, endColumn: 2 },
+            kind: 'percent',
+            decimalPlaces: 1,
+          },
+          {
+            range: { startRow: 0, endRow: 1, startColumn: 2, endColumn: 3 },
+            kind: 'automatic',
+          },
+        ],
+      },
+      {
+        rows: [
+          ['a', 'b', 'c'],
+          ['d', 'e', 'f'],
+        ],
+        totalRows: 2,
+        maxColumns: 3,
+        headerRow: false,
+      }
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      presentation: {
+        merges: [],
+        valueFormats: [
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 0, endColumn: 1 },
+            kind: 'currency',
+            currency: 'USD',
+            decimalPlaces: 2,
+          },
+          {
+            range: { startRow: 0, endRow: 2, startColumn: 1, endColumn: 2 },
+            kind: 'percent',
+            decimalPlaces: 1,
+          },
+          {
+            range: { startRow: 1, endRow: 2, startColumn: 2, endColumn: 3 },
+            kind: 'currency',
+            currency: 'USD',
+            decimalPlaces: 2,
+          },
+        ],
+      },
+    });
+  });
+
+  it.each([
+    [[{ range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 } }]],
+    [
+      [
+        {
+          range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+          kind: 'number',
+        },
+      ],
+    ],
+    [
+      [
+        {
+          range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+          kind: 'number',
+          decimalPlaces: 11,
+        },
+      ],
+    ],
+    [
+      [
+        {
+          range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+          kind: 'currency',
+          currency: 'usd',
+          decimalPlaces: 2,
+        },
+      ],
+    ],
+    [
+      [
+        {
+          range: { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 },
+          kind: 'date',
+          decimalPlaces: 2,
+        },
+      ],
+    ],
+  ])('rejects an invalid value-format discriminated union %#', (valueFormats) => {
+    const result = validateSheetPresentation({ valueFormats } as never, context);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: 'invalid_value_format', valueFormatIndex: 0 }),
+        ]),
+      })
+    );
+  });
+
+  it('inherits, clears, and snapshots value-format overrides independently', () => {
+    const range = { startRow: 0, endRow: 1, startColumn: 0, endColumn: 1 };
+    const embedded = {
+      formats: [{ range, bold: true }],
+      valueFormats: [{ range, kind: 'number' as const, decimalPlaces: 2 }],
+    };
+
+    expect(resolveSheetPresentation(embedded, { valueFormats: undefined })).toEqual(embedded);
+    expect(resolveSheetPresentation(embedded, { valueFormats: [] })).toEqual({
+      formats: embedded.formats,
+      valueFormats: [],
+    });
+
+    const overLimit = validateSheetPresentation(
+      {
+        valueFormats: Array.from({ length: MAX_SHEET_VALUE_FORMAT_RULES + 1 }, () => null) as never,
+      },
+      context
+    );
+    expect(overLimit).toEqual(
+      expect.objectContaining({
+        ok: false,
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: 'too_many_value_formats' }),
+        ]),
+      })
+    );
+  });
+
+  it('rejects value-format partitions that exceed the normalized rule cap', () => {
+    const rows = Array.from({ length: 1000 }, () => Array<string>(256).fill(''));
+    const cancellations = Array.from({ length: 1000 }, (_, row) => {
+      const start = (row * 7) % 200;
+      return [1, 3, 5, 7].map((offset): SheetValueFormatRule => ({
+        range: {
+          startRow: row,
+          endRow: row + 1,
+          startColumn: start + offset,
+          endColumn: start + offset + 1,
+        },
+        kind: 'automatic',
+      }));
+    }).flat();
+    const result = validateSheetPresentation(
+      {
+        valueFormats: [
+          {
+            range: { startRow: 0, endRow: 1000, startColumn: 0, endColumn: 256 },
+            kind: 'number',
+            decimalPlaces: 2,
+          },
+          ...cancellations,
+        ],
+      },
+      { rows, totalRows: 1000, maxColumns: 256, headerRow: false }
+    );
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: 'too_many_value_formats' }),
+        ]),
       })
     );
   });

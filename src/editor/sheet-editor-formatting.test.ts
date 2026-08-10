@@ -18,7 +18,7 @@ const STRUCTURE_LABELS = [
 describe('sheet-editor formatting toolbar', () => {
   afterEach(() => document.body.replaceChildren());
 
-  it('adds eleven ordered grouped tools only for explicit document sessions', () => {
+  it('adds sixteen ordered grouped tools only for explicit document sessions', () => {
     const documentEditor = createDocument(sheet('a,b'));
     const toolbar = documentEditor.shadowRoot?.querySelector('[role="toolbar"]');
     const buttons = toolbarButtons(documentEditor);
@@ -30,14 +30,19 @@ describe('sheet-editor formatting toolbar', () => {
       'Strikethrough',
       'Horizontal alignment: Left',
       'Vertical alignment: Middle',
+      'Currency',
+      'Percent',
+      'Decrease decimal places',
+      'Increase decimal places',
+      'Value format: Automatic',
       ...STRUCTURE_LABELS,
     ]);
-    expect(buttons).toHaveLength(11);
+    expect(buttons).toHaveLength(16);
     expect(buttons.filter((button) => button.tabIndex === 0)).toEqual([
       formatButton(documentEditor, 'bold'),
     ]);
-    expect(toolbar?.querySelectorAll('[role="group"]')).toHaveLength(4);
-    expect(toolbar?.querySelectorAll('.sheet-editor__toolbar-separator')).toHaveLength(3);
+    expect(toolbar?.querySelectorAll('[role="group"]')).toHaveLength(5);
+    expect(toolbar?.querySelectorAll('.sheet-editor__toolbar-separator')).toHaveLength(4);
     expect(trigger(documentEditor, 'horizontal').getAttribute('aria-haspopup')).toBe('menu');
     expect(trigger(documentEditor, 'horizontal').getAttribute('aria-controls')).toBe(
       menu(documentEditor, 'horizontal').id
@@ -53,6 +58,7 @@ describe('sheet-editor formatting toolbar', () => {
     );
     expect(csvEditor.shadowRoot?.querySelector('[data-sheet-format]')).toBeNull();
     expect(csvEditor.shadowRoot?.querySelector('[data-sheet-alignment-trigger]')).toBeNull();
+    expect(csvEditor.shadowRoot?.querySelector('[data-sheet-value-format-trigger]')).toBeNull();
     expect(csvEditor.shadowRoot?.querySelector('[role="menu"]')).toBeNull();
     expect(csvEditor.getContent()).toBe('a,b');
   });
@@ -350,7 +356,7 @@ describe('sheet-editor formatting toolbar', () => {
 
     const readonly = createDocument(sheet('a'));
     readonly.setAttribute('readonly', 'true');
-    expect(toolbarButtons(readonly)).toHaveLength(11);
+    expect(toolbarButtons(readonly)).toHaveLength(16);
     expect(toolbarButtons(readonly).every((button) => button.disabled)).toBe(true);
 
     const empty = createDocument(sheet(''));

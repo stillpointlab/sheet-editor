@@ -35,8 +35,10 @@ export {
   formatA1CellRange,
   formatA1Range,
   MAX_SHEET_ALIGNMENT_RULES,
+  MAX_SHEET_DECIMAL_PLACES,
   MAX_SHEET_FORMAT_RULES,
   MAX_SHEET_MERGES,
+  MAX_SHEET_VALUE_FORMAT_RULES,
   parseA1CellRange,
   parseA1Range,
   validateSheetPresentation,
@@ -53,6 +55,8 @@ export type {
   SheetPresentationValidationContext,
   SheetPresentationValidationResult,
   SheetVerticalAlignment,
+  SheetValueFormatKind,
+  SheetValueFormatRule,
 } from './presentation';
 export { setErrorHandler } from './log';
 export { SheetPreview } from './preview/sheet-preview';
