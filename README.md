@@ -42,6 +42,33 @@ grid.setData(
 document.body.append(grid);
 ```
 
+Presentation formatting and CSV safety are also available as side-effect-free public helpers:
+
+```ts
+import { escapeCsvFormulaValue, serializeCsv } from '@stillpointlab/sheet-editor/csv';
+import {
+  formatSheetCellValue,
+  type EffectiveSheetValueFormat,
+} from '@stillpointlab/sheet-editor/presentation';
+
+const format: EffectiveSheetValueFormat = {
+  kind: 'currency',
+  currency: 'CAD',
+  decimalPlaces: 2,
+};
+
+formatSheetCellValue('12.345', format); // "$12.35"
+serializeCsv([[escapeCsvFormulaValue(' =SUM(A1:A2)'), '12.345']], {
+  escapeFormulas: false,
+});
+```
+
+`formatSheetCellValue` uses the sheet display contract (fixed `en-US`, grouping, and half-expansion)
+without changing the supplied raw string. Keep that raw value for editing, persistence, search, and
+export. `escapeCsvFormulaValue` prefixes formula-triggering text—including triggers after leading
+whitespace—with an apostrophe. Call it only for cells your schema knows are textual, then serialize
+the already-classified rows with formula escaping disabled so negative numeric cells stay numeric.
+
 Both elements accept zero-based, half-open merge and cell-style ranges as atomic presentation
 input:
 

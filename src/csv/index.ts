@@ -1,4 +1,10 @@
-export { DEFAULT_CSV_LIMITS, parseCsv, serializeCsv, utf8ByteLength } from './csv';
+export {
+  DEFAULT_CSV_LIMITS,
+  escapeCsvFormulaValue,
+  parseCsv,
+  serializeCsv,
+  utf8ByteLength,
+} from './csv';
 
 export type {
   CsvLimits,
