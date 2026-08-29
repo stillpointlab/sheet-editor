@@ -282,7 +282,9 @@ export function serializeCsv(
     .map((row, rowIndex) => {
       const serialized = row
         .map((rawCell) => {
-          const cell = options.escapeFormulas ? escapeFormula(String(rawCell)) : String(rawCell);
+          const cell = options.escapeFormulas
+            ? escapeCsvFormulaValue(String(rawCell))
+            : String(rawCell);
           return quoteCell(cell);
         })
         .join(',');
@@ -327,7 +329,8 @@ function utf8BytesForCodePoint(codePoint: number): number {
   return 4;
 }
 
-function escapeFormula(value: string): string {
+/** Neutralize spreadsheet formula triggers while retaining the raw text. */
+export function escapeCsvFormulaValue(value: string): string {
   return /^[\t\r]/u.test(value) || /^\s*[=+\-@]/u.test(value) ? `'${value}` : value;
 }
 

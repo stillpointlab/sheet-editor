@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { DEFAULT_CSV_LIMITS, parseCsv, serializeCsv, utf8ByteLength } from './csv';
+import {
+  DEFAULT_CSV_LIMITS,
+  escapeCsvFormulaValue,
+  parseCsv,
+  serializeCsv,
+  utf8ByteLength,
+} from './index';
 
 describe('parseCsv', () => {
   it('parses RFC-4180 quoting, escaped quotes, embedded newlines, and empty fields', () => {
@@ -206,4 +212,20 @@ describe('serializeCsv', () => {
       `'=SUM(A1),'+1,'-1,'@cmd,'\tcommand,"'\rcommand",'  =later`
     );
   });
+});
+
+describe('escapeCsvFormulaValue public export', () => {
+  it.each(['=formula', '+formula', '-formula', '@formula', '  =formula', '\tformula', '\rformula'])(
+    'protects %j',
+    (value) => {
+      expect(escapeCsvFormulaValue(value)).toBe(`'${value}`);
+    }
+  );
+
+  it.each(['plain text', '12.345', '  plain text', ''])(
+    'leaves non-triggering %j unchanged',
+    (value) => {
+      expect(escapeCsvFormulaValue(value)).toBe(value);
+    }
+  );
 });

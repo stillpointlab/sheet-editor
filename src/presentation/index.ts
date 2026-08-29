@@ -7,6 +7,7 @@ export {
   MAX_SHEET_VALUE_FORMAT_RULES,
   validateSheetPresentation,
 } from './presentation';
+export { formatSheetCellValue } from '../shared/value-format';
 
 export type {
   SheetCellRange,
@@ -23,3 +24,4 @@ export type {
   SheetValueFormatKind,
   SheetValueFormatRule,
 } from './presentation';
+export type { EffectiveSheetValueFormat } from '../shared/value-format';
