@@ -289,6 +289,9 @@ Owners can override individual sheet surfaces with `--spl-sheet-text`, `--spl-sh
 
 ## Scripts
 
+Use Node.js 24.15+ on the 24.x line for development. Node.js 22.22.2+ on the
+22.x line and 26+ also satisfy the build and test requirements.
+
 - `npm run build` — generate styles and bundle ESM/CJS plus declarations
 - `npm run dev` — run the standalone fixture harness
 - `npm test` — run Vitest/jsdom coverage

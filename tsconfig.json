@@ -15,8 +15,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "declaration": true,
-    "declarationMap": true,
-    "ignoreDeprecations": "6.0"
+    "declarationMap": true
   },
   "include": ["src", "dev", "*.config.ts", "*.config.mjs"],
   "exclude": ["dist", "node_modules"]
