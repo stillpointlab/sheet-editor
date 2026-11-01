@@ -1,3 +1,5 @@
+> **Archived 2026-11-01.** This package now lives in [stillpointlab/surfaces](https://github.com/stillpointlab/surfaces) as `packages/formats/sheet` (`@stillpointlab/sheet-format`), with this history preserved. Context Manager mounts that repository as one submodule (ADR-0035).
+
 # @stillpointlab/sheet-editor
 
 Spreadsheet-style CSV grid web components and side-effect-free sheet codecs for Stillpoint Lab
